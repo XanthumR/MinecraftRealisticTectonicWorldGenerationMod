@@ -1,0 +1,44 @@
+{
+  "dimensions": {
+    "minecraft:overworld": {
+      "type": "realtectonics:tall_overworld",
+      "generator": {
+        "type": "realtectonics:planet",
+        "biome_source": {
+          "type": "realtectonics:planet",
+          "pack": "auto"
+        },
+        "settings": "realtectonics:planet",
+        "planet": {
+          "width": 1024,
+          "plates": 14,
+          "ocean_fraction": 0.7,
+          "mountain_scale": 1.0,
+          "river_width": 2.0,
+          "earth": true
+        }
+      }
+    },
+    "minecraft:the_nether": {
+      "type": "minecraft:the_nether",
+      "generator": {
+        "type": "minecraft:noise",
+        "biome_source": {
+          "type": "minecraft:multi_noise",
+          "preset": "minecraft:nether"
+        },
+        "settings": "minecraft:nether"
+      }
+    },
+    "minecraft:the_end": {
+      "type": "minecraft:the_end",
+      "generator": {
+        "type": "minecraft:noise",
+        "biome_source": {
+          "type": "minecraft:the_end"
+        },
+        "settings": "minecraft:end"
+      }
+    }
+  }
+}

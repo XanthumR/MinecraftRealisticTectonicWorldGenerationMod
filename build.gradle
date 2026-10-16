@@ -1,0 +1,53 @@
+plugins {
+    id 'application'
+    id 'net.neoforged.moddev' version '2.0.148'
+}
+
+group = 'com.realtectonics'
+version = '0.1.0'
+base { archivesName = 'realtectonics' }
+
+repositories {
+    mavenCentral()
+    maven { url = 'https://api.modrinth.com/maven' } // Sodium, Distant Horizons for dev runs
+}
+
+dependencies {
+    // Immersive Portals (immersive-portals-neoforge 6.0.7 + cloth-config) is optional: drop it in run/mods and
+    // walking off the east edge brings you in from the west.
+    // Faster rendering, and far-off terrain drawn as low-detail LODs: the planet's ranges on the horizon.
+    runtimeOnly 'maven.modrinth:distanthorizons:3.3.3-1.21.1'
+    // Biomes O' Plenty for dev runs: new worlds pick its realistic biomes (TectonicBiomeSource "biomesoplenty" pack).
+    runtimeOnly 'maven.modrinth:biomes-o-plenty:BtZKRp69' // version ids: the version numbers are shared with the Forge builds
+    runtimeOnly 'maven.modrinth:terrablender:6e8GCrLb'
+    runtimeOnly 'maven.modrinth:glitchcore:S2TfWrZR'
+    testImplementation platform('org.junit:junit-bom:5.11.4')
+    testImplementation 'org.junit.jupiter:junit-jupiter'
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+}
+
+// NeoForge 1.21.1 runs on Java 21
+java.toolchain.languageVersion = JavaLanguageVersion.of(21)
+
+neoForge {
+    version = '21.1.259'
+    runs {
+        client { client()
+		 jvmArguments.add('-Xmx8G')
+ }
+        server {
+            server()
+            programArgument '--nogui'
+            gameDirectory = project.file('run-server') // its own folder: client-only mods in run/mods (Sodium, Iris) crash a server
+        }
+    }
+    mods {
+        realtectonics { sourceSet sourceSets.main }
+    }
+}
+
+// The standalone simulation preview: gradlew run --args="..."
+application { mainClass = 'com.realtectonics.sim.Prototype' }
+tasks.named('run') { jvmArgs '-Xmx4g' }
+
+test { useJUnitPlatform() }
