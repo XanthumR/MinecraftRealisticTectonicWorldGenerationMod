@@ -182,7 +182,7 @@ public final class TectonicBiomeSource extends BiomeSource {
         if (c.keys[slot] != key) {
             c.keys[slot] = key;
             int bx = QuartPos.toBlock(x), bz = QuartPos.toBlock(z);
-            var options = biomes.get(RealTectonics.terrain().biomeAt(bx, bz));
+            var options = biomes.get(RealTectonics.terrain().biomeAtCached(bx, bz));
             c.values[slot] = options.size() == 1 ? options.get(0) : options.get((int) (RealTectonics.terrain().variety(bx, bz) * options.size()));
         }
         return (Holder<net.minecraft.world.level.biome.Biome>) c.values[slot];

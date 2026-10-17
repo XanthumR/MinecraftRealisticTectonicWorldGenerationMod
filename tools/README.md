@@ -32,6 +32,9 @@ one before trusting it.
 | `genbench.jsh` | 8-thread chunk throughput, `-Df1 -Df2` formats; a new format should not be slower |
 | `coltime.jsh` | µs per column |
 | `relaxhash.jsh` | Time for a 2048² area through the rockfall tiles and a hash of the result: unchanged by pure speed work (`-Dfmt`) |
+| `relaxprof.jsh` | Where `relaxedColumns` spends its time (JFR inside jshell): own time by line and time inside our methods |
+| `chunkbench.jsh` | Chunk-generation stand-in: 16 biome lookups then 18x18 columns per chunk; `-Dcached=true` checks `biomeAtCached` against `biomeAt` (0 mismatches) |
+| `jfrstutter.py` | Stutter report for a JFR recording of the running game (`jcmd <pid> JFR.start settings=profile duration=60s filename=x.jfr`) |
 | `genspeed.py`, `genab.sh` | Whole-pipeline chunks/s on the dev server (rcon on): one area, or warm-up plus three fresh areas |
 | `c2metest.sh label` | Speed plus block counts in three land areas and the log's errors, to compare a mod in `run-server/mods` with none (C2ME 0.4.0-alpha.0.123: 181 vs 91 chunks/s, terrain identical, trees differ slightly) |
 | `needles.jsh`, `walls.jsh`, `screecount.jsh` | Steep spots, lowland walls, scree share |
