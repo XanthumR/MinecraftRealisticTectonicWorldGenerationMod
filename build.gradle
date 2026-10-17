@@ -41,10 +41,11 @@ dependencies {
 loom {
     runs {
         client {
-            vmArgs '-Xmx8G', "-Dfabric.addMods=${configurations.clientMods.files.join(File.pathSeparator)}"
+            // ZGC: G1's pauses (up to ~36 ms while chunks generate nonstop) were the microstutters; ZGC's stay under 1 ms (tools/stutter.jsh)
+            vmArgs '-Xmx8G', '-XX:+UseZGC', "-Dfabric.addMods=${configurations.clientMods.files.join(File.pathSeparator)}"
             runDir 'run-fabric' // not run/: its 1.21.1 worlds would be upgraded for good, and its mods are NeoForge's
         }
-        server { runDir 'run-server' } // its own folder: client-only mods would crash a server
+        server { runDir 'run-server'; vmArgs '-XX:+UseZGC' } // its own folder: client-only mods would crash a server
     }
 }
 

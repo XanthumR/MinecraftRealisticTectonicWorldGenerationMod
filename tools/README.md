@@ -19,6 +19,7 @@ one before trusting it.
 | `calderas.jsh` | Caldera lake spills (0) |
 | `biomeedge.jsh` | Desert next to snow (0%) |
 | `tune.sh` | Earth climate vs the real Köppen map in one go (`earthclim.jsh` → `koppen.py` → `kregion.py`); pass `-R-D` knobs. `earthclim.jsh -Dseed=N` + `kdry.py` give a random planet's desert shares, `kshares.py` Earth's per region, `climrow.jsh` rain along one latitude, `climtime.jsh` Huge simulation time, `randmap.jsh` a random planet's map and ice share ; `-R-Dwidth=2048` on `tune.sh` checks planet size doesn't change the climate |
+| `stutter.jsh` | Render-thread stalls while 4 worldgen threads pull new tiles: run with and without `-R-XX:+UseZGC` (G1: 10 frames over 10 ms, max ~20 ms; ZGC: 0, max 6.4 ms) |
 | `canada.jsh` | Format 45: snowy taiga, snow cover and frozen water over a lat/lon box of the Earth planet, formats 44 vs 45 |
 | `volcvar.jsh` | Volcano islands bigger than the metre profile (ratio > 1.5), lobes and variety between cones (> 0.1) |
 | `wetness.jsh` | Lake-effect rain near lakes (> 0) and fewer dry biomes beside big rivers at 38 than 37 |
