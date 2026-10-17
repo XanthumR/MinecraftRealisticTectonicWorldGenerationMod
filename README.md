@@ -69,7 +69,9 @@ then pauses the game for up to ~35 ms at a time: microstutters. ZGC keeps its pa
 
 - **[Voxy](https://modrinth.com/mod/voxy)** (with Sodium) and **[Voxy WorldGen](https://modrinth.com/mod/voxy-worldgen)**
   (with Cloth Config): see whole mountain ranges on the horizon. Voxy only draws terrain that has been generated; Voxy
-  WorldGen generates it around you in the background.
+  WorldGen generates it around you in the background. Voxy draws with OpenGL: if the game picks Vulkan (it can on AMD cards), Voxy
+  crashes at startup, so set the graphics API to OpenGL in Video Settings (`preferredGraphicsBackend:"opengl"` in
+  `options.txt`).
 - **[Distant Horizons](https://modrinth.com/mod/distanthorizons)**: the alternative; it generates the far terrain itself.
 - **[Biomes O' Plenty](https://modrinth.com/mod/biomes-o-plenty)**: picked up automatically for new worlds.
 - **[C2ME](https://modrinth.com/mod/c2me-fabric)**: about twice the chunk generation speed on a server (alpha on 26.2).
