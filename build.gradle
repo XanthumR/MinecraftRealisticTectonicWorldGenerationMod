@@ -35,7 +35,8 @@ neoForge {
         client {
             client()
             // ZGC: G1's pauses (up to ~36 ms while chunks generate nonstop) were the microstutters; ZGC's stay under 1 ms
-            jvmArguments.addAll('-Xmx8G', '-XX:+UseZGC')
+            // With chunks churning (~1 GB/s of garbage) ZGC's default threads fell behind and stalled the render thread 17-65 ms
+            jvmArguments.addAll('-Xmx8G', '-XX:+UseZGC', '-XX:ConcGCThreads=3')
         }
         server {
             server()

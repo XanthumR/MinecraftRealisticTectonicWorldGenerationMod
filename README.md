@@ -59,7 +59,7 @@ to see the whole planet (**G** switches to its rocks); right-click a spot on the
 
 Large and Huge planets need more memory to create (Huge: give Minecraft 4-6 GB).
 
-**Smooth play:** add `-XX:+UseZGC` to Minecraft's Java arguments (in your launcher's installation settings). Chunks
+**Smooth play:** add `-XX:+UseZGC -XX:ConcGCThreads=3` to Minecraft's Java arguments (in your launcher's installation settings). Chunks
 generate all the time while you play (more so with Distant Horizons), and Java's default garbage collector then pauses
 the game for up to ~35 ms at a time: microstutters. ZGC keeps its pauses under a millisecond.
 
