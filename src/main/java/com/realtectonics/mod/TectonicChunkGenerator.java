@@ -238,7 +238,6 @@ public final class TectonicChunkGenerator extends NoiseBasedChunkGenerator {
         Beardifier beard = Beardifier.forStructuresInChunk(structures, chunk.getPos());
         int x0 = chunk.getPos().getMinBlockX(), z0 = chunk.getPos().getMinBlockZ();
         Terrain.Column[] cols = new Terrain.Column[18 * 18], relaxed = terrain.relaxedColumns(x0 - 1, z0 - 1, 18, 18);
-        if (beard == Beardifier.EMPTY) return relaxed; // no structure here, as in most chunks: the ground stands as it is
         Probe probe = new Probe();
         for (int dz = -1; dz <= 16; dz++)
             for (int dx = -1; dx <= 16; dx++) cols[dx + 1 + (dz + 1) * 18] = beardify(relaxed[dx + 1 + (dz + 1) * 18], beard, x0 + dx, z0 + dz, probe);
