@@ -1,0 +1,25 @@
+{
+  "stats": {
+    "minecraft:used": {
+      "minecraft:oak_boat": 3
+    },
+    "minecraft:custom": {
+      "minecraft:time_since_rest": 5019,
+      "minecraft:walk_one_cm": 4569,
+      "minecraft:leave_game": 1,
+      "minecraft:walk_under_water_one_cm": 580,
+      "minecraft:boat_one_cm": 75255,
+      "minecraft:play_time": 5019,
+      "minecraft:jump": 56,
+      "minecraft:time_since_death": 5019,
+      "minecraft:sprint_one_cm": 4681,
+      "minecraft:total_world_time": 7436,
+      "minecraft:fly_one_cm": 60140,
+      "minecraft:walk_on_water_one_cm": 385,
+      "minecraft:crouch_one_cm": 16,
+      "minecraft:sneak_time": 52,
+      "minecraft:climb_one_cm": 228
+    }
+  },
+  "DataVersion": 4903
+}

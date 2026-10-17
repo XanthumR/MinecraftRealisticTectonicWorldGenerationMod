@@ -32,12 +32,15 @@ java.toolchain.languageVersion = JavaLanguageVersion.of(21)
 neoForge {
     version = '21.1.259'
     runs {
-        client { client()
-		 jvmArguments.add('-Xmx8G')
- }
+        client {
+            client()
+            // ZGC: G1's pauses (up to ~36 ms while chunks generate nonstop) were the microstutters; ZGC's stay under 1 ms
+            jvmArguments.addAll('-Xmx8G', '-XX:+UseZGC')
+        }
         server {
             server()
             programArgument '--nogui'
+            jvmArgument '-XX:+UseZGC'
             gameDirectory = project.file('run-server') // its own folder: client-only mods in run/mods (Sodium, Iris) crash a server
         }
     }
