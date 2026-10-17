@@ -76,6 +76,20 @@ public final class Terrain {
     static final float ICE_EDGE = 12;     // blocks below the land the ice surface sinks at cells without ice, so glaciers thin to their edges
     static final float ICE_SUMMER_MAX = 15; // °C: summers this warm melt any glacier tongue that reaches them
     static final float LAKE_SILL = 0.25f;   // cells: width of the rock sill between two lakes at different levels
+    /**
+     * Where a tile's columns are worked out in parallel: every core, at the lowest priority. On Java's shared pool, at
+     * normal priority, each tile took every core for half a second, and the game's render and server threads, also at
+     * normal priority, waited their turn: frames of 30-60 ms (tools/stutter.jsh: 56-60 frames over 10 ms a run; here
+     * 1-2, worst ~11 ms). Tiles now yield to the game. The terrain doesn't depend on the threads.
+     */
+    static final java.util.concurrent.ForkJoinPool TILE_POOL = new java.util.concurrent.ForkJoinPool(
+            Runtime.getRuntime().availableProcessors(), pool -> {
+                java.util.concurrent.ForkJoinWorkerThread t = java.util.concurrent.ForkJoinPool.defaultForkJoinWorkerThreadFactory.newThread(pool);
+                t.setName("Tectonic terrain " + t.getPoolIndex());
+                t.setPriority(Thread.MIN_PRIORITY);
+                t.setDaemon(true);
+                return t;
+            }, null, false);
     static final int BASE_BLOCK = 64, BASE_CACHE = 192; // real blocks per side of a shared square of plain columns (a power of two); squares kept (at most ~38 MB; 512 was no faster)
     static final int RELAX_TILE = 256, RELAX_STEPS = 23, RELAX_CACHE = 24; // blocks per rockfall tile (512 halves the margin overhead but 6 cached tiles thrash under parallel wide generation, and 16 cost ~250 MB; no whole-pipeline gain); rounds of rockfall (the tile margin is one more); tiles kept
     static final float RELAX_TALUS = 2, RELAX_RATE = 0.2f, SCREE_FALLEN = 4; // blocks up per block across that rock stands; share of the excess falling per round; blocks of rubble that make scree
@@ -648,7 +662,7 @@ public final class Terrain {
         float[] hgt = new float[n * n], fallen = new float[n * n], strength = new float[n * n];
         // Blocks in parallel: the threads that need this tile are waiting on it, so it should finish fast.
         int bx0 = Math.floorDiv(x0 - m, BASE_BLOCK), bz0 = Math.floorDiv(z0 - m, BASE_BLOCK), nb = Math.floorDiv(x0 - m + n - 1, BASE_BLOCK) - bx0 + 1;
-        java.util.stream.IntStream.range(0, nb * nb).parallel().forEach(k -> {
+        Runnable blocks = () -> java.util.stream.IntStream.range(0, nb * nb).parallel().forEach(k -> {
             int bx = bx0 + k % nb, bz = bz0 + k / nb;
             Column[] b = baseBlock(bx, bz);
             int ox = bx * BASE_BLOCK - (x0 - m), oz = bz * BASE_BLOCK - (z0 - m); // block corner in tile coordinates
@@ -656,6 +670,7 @@ public final class Terrain {
             for (int z = Math.max(0, -oz); z < Math.min(BASE_BLOCK, n - oz); z++)
                 System.arraycopy(b, from + z * BASE_BLOCK, cs, ox + from + (oz + z) * n, to - from);
         });
+        TILE_POOL.submit(blocks).join();
         for (int i = 0; i < n * n; i++) {
             hgt[i] = cs[i].ground();
             // Some rock stands steeper than other: hard beds and jointed rock vary over a few dozen blocks.
