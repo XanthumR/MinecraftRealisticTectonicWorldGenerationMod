@@ -5,7 +5,14 @@ import com.mojang.serialization.MapCodec;
 import com.realtectonics.sim.PlanetData;
 import com.realtectonics.sim.PlanetSettings;
 import com.realtectonics.sim.Terrain;
+import net.fabricmc.api.ModInitializer;
+import net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents;
+import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
+import net.fabricmc.loader.api.FabricLoader;
+import net.minecraft.core.Registry;
+import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.core.registries.Registries;
+import net.minecraft.resources.Identifier;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
@@ -15,14 +22,6 @@ import net.minecraft.world.level.biome.BiomeSource;
 import net.minecraft.world.level.chunk.ChunkGenerator;
 import net.minecraft.world.level.dimension.LevelStem;
 import net.minecraft.world.level.storage.LevelResource;
-import net.neoforged.bus.api.IEventBus;
-import net.neoforged.fml.ModList;
-import net.neoforged.fml.common.Mod;
-import net.neoforged.neoforge.common.NeoForge;
-import net.neoforged.neoforge.event.server.ServerAboutToStartEvent;
-import net.neoforged.neoforge.event.server.ServerStartedEvent;
-import net.neoforged.neoforge.event.tick.PlayerTickEvent;
-import net.neoforged.neoforge.registries.DeferredRegister;
 import org.slf4j.Logger;
 
 import java.io.IOException;
@@ -30,19 +29,10 @@ import java.io.UncheckedIOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 
-@Mod(RealTectonics.MODID)
-public final class RealTectonics {
+public final class RealTectonics implements ModInitializer {
     public static final String MODID = "realtectonics";
     static final int POLE_MARGIN = 16; // blocks short of the map edge where the ice sheet stops you
     private static final Logger LOG = LogUtils.getLogger();
-
-    private static final DeferredRegister<MapCodec<? extends ChunkGenerator>> GENERATORS = DeferredRegister.create(Registries.CHUNK_GENERATOR, MODID);
-    private static final DeferredRegister<MapCodec<? extends BiomeSource>> BIOME_SOURCES = DeferredRegister.create(Registries.BIOME_SOURCE, MODID);
-
-    static {
-        GENERATORS.register("planet", () -> TectonicChunkGenerator.CODEC);
-        BIOME_SOURCES.register("planet", () -> TectonicBiomeSource.CODEC);
-    }
 
     // ponytail: one planet per running server; fine for single-player and dedicated servers
     private static volatile Terrain terrain;
@@ -56,13 +46,16 @@ public final class RealTectonics {
         preview = new Preview(seed, settings, data);
     }
 
-    public RealTectonics(IEventBus modBus) {
-        GENERATORS.register(modBus);
-        BIOME_SOURCES.register(modBus);
-        modBus.addListener(MapTeleport::register);
-        NeoForge.EVENT_BUS.addListener(RealTectonics::onServerAboutToStart);
-        NeoForge.EVENT_BUS.addListener(RealTectonics::onServerStarted);
-        NeoForge.EVENT_BUS.addListener(RealTectonics::onPlayerTick);
+    @Override
+    public void onInitialize() {
+        Registry.register(BuiltInRegistries.CHUNK_GENERATOR, Identifier.fromNamespaceAndPath(MODID, "planet"), TectonicChunkGenerator.CODEC);
+        Registry.register(BuiltInRegistries.BIOME_SOURCE, Identifier.fromNamespaceAndPath(MODID, "planet"), TectonicBiomeSource.CODEC);
+        MapTeleport.register();
+        ServerLifecycleEvents.SERVER_STARTING.register(RealTectonics::onServerAboutToStart); // before the levels load
+        ServerLifecycleEvents.SERVER_STARTED.register(RealTectonics::onServerStarted);
+        ServerTickEvents.END_SERVER_TICK.register(server -> {
+            for (ServerPlayer player : server.getPlayerList().getPlayers()) onPlayerTick(player);
+        });
     }
 
     /** The running planet, or null when no Tectonic Planet world is loaded in this game. */
@@ -77,15 +70,14 @@ public final class RealTectonics {
     }
 
     /** Runs before the levels load: simulate the planet once per world, then reuse the saved result. */
-    private static void onServerAboutToStart(ServerAboutToStartEvent event) {
-        MinecraftServer server = event.getServer();
-        LevelStem overworld = server.registryAccess().registryOrThrow(Registries.LEVEL_STEM).get(LevelStem.OVERWORLD);
+    private static void onServerAboutToStart(MinecraftServer server) {
+        LevelStem overworld = server.registryAccess().lookupOrThrow(Registries.LEVEL_STEM).getValue(LevelStem.OVERWORLD);
         if (overworld == null || !(overworld.generator() instanceof TectonicChunkGenerator generator)) {
             terrain = null;
             return;
         }
         PlanetSettings settings = generator.planet();
-        long seed = server.getWorldData().worldGenOptions().seed();
+        long seed = server.getWorldGenSettings().options().seed();
         Path file = server.getWorldPath(LevelResource.ROOT).resolve(MODID).resolve("planet.bin");
         try {
             PlanetData data;
@@ -115,10 +107,9 @@ public final class RealTectonics {
      * from the west, and see across the seam. Its north and south portals sit far past the poles, out of reach.
      * Set up once per world; without Immersive Portals the terrain still repeats every circumference.
      */
-    private static void onServerStarted(ServerStartedEvent event) {
+    private static void onServerStarted(MinecraftServer server) {
         Terrain t = terrain;
-        if (t == null || !ModList.get().isLoaded("immersive_portals_core")) return;
-        MinecraftServer server = event.getServer();
+        if (t == null || !FabricLoader.getInstance().isModLoaded("imm_ptl_core")) return;
         Path marker = server.getWorldPath(LevelResource.ROOT).resolve(MODID).resolve("wrap.txt");
         if (Files.exists(marker)) return;
         int half = t.circumference / 2, far = 4 * t.circumference;
@@ -136,13 +127,13 @@ public final class RealTectonics {
      * The poles are an impassable ice sheet. A real pole crossing would mirror the player (you come out at the
      * opposite longitude heading south), which Minecraft cannot do, and wrapping to the other pole would be worse.
      */
-    private static void onPlayerTick(PlayerTickEvent.Post event) {
+    private static void onPlayerTick(ServerPlayer player) {
         Terrain t = terrain;
-        if (t == null || !(event.getEntity() instanceof ServerPlayer player) || player.level().dimension() != Level.OVERWORLD) return;
+        if (t == null || player.level().dimension() != Level.OVERWORLD) return;
         double z = player.getZ(), north = t.northPoleZ() + POLE_MARGIN, south = t.southPoleZ() - POLE_MARGIN;
         if (z >= north && z <= south) return;
         Entity mover = player.getRootVehicle(); // boats and horses stop too
         mover.teleportTo(mover.getX(), mover.getY(), Math.clamp(z, north, south));
-        player.displayClientMessage(Component.literal("The polar ice sheet is impassable."), true);
+        player.sendOverlayMessage(Component.literal("The polar ice sheet is impassable."));
     }
 }

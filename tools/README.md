@@ -2,7 +2,7 @@
 
 Run jshell scripts from the project root after `./gradlew compileJava -q`:
 
-    "/c/Program Files/Java/jdk-21.0.12/bin/jshell" -R-Xmx6g [-R-Dkey=val ...] --class-path build/classes/java/main tools/X.jsh
+    "/c/Program Files/Java/jdk-25.0.4/bin/jshell" -R-Xmx6g [-R-Dkey=val ...] --class-path build/classes/java/main tools/X.jsh
 
 Most build seed 777 at `PlanetSettings.DEFAULT` (`new Terrain(d, 777, 1, 1, 2)`); images go to `out/`.
 Only the scripts below are maintained. The rest are one-off experiments from past formats (see docs/FORMATS.md); read

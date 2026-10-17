@@ -1,6 +1,7 @@
 # Realistic Tectonics
 
-A Minecraft world generator for **NeoForge 1.21.1** that doesn't use noise to fake terrain: it simulates a whole planet
+A Minecraft world generator for **Fabric, Minecraft 26.2** (the `main` branch has the NeoForge 1.21.1 version) that
+doesn't use noise to fake terrain: it simulates a whole planet
 first, then builds the blocks from it.
 
 Plates drift, collide and rift; mountains rise where they meet and wear down under rain and ice; rivers find their way to
@@ -36,7 +37,8 @@ biomes. Every mountain range, desert and river in the world is there for a reaso
 
 ## Installing
 
-1. Install [NeoForge](https://neoforged.net/) for Minecraft 1.21.1 (Java 21).
+1. Install [Fabric Loader](https://fabricmc.net/use/) for Minecraft 26.2 (Java 25) and put
+   [Fabric API](https://modrinth.com/mod/fabric-api) in your `mods` folder.
 2. Put the mod's jar in your `mods` folder.
 3. When you create a world, open **More World Options → World Type** and pick **Tectonic Planet** or **Tectonic Earth**.
    The *Customize* button opens the planet settings.
@@ -61,15 +63,19 @@ Large and Huge planets need more memory to create (Huge: give Minecraft 4-6 GB).
 
 ### Works well with
 
-- **[Distant Horizons](https://modrinth.com/mod/distanthorizons)**: see whole mountain ranges on the horizon.
+- **[Voxy](https://modrinth.com/mod/voxy)** (with Sodium): see whole mountain ranges on the horizon. It draws only
+  terrain that has been generated, so pregenerate with [Chunky](https://modrinth.com/mod/chunky).
+- **[Distant Horizons](https://modrinth.com/mod/distanthorizons)**: the alternative; it generates the far terrain itself.
 - **[Biomes O' Plenty](https://modrinth.com/mod/biomes-o-plenty)**: picked up automatically for new worlds.
-- **[C2ME](https://modrinth.com/mod/c2me-neoforge)**: about twice the chunk generation speed on a server.
+- **[C2ME](https://modrinth.com/mod/c2me-fabric)**: about twice the chunk generation speed on a server (alpha on 26.2).
 
 ## Building
 
+Needs Java 25 (`JAVA_HOME` pointing at it).
+
 ```
 ./gradlew build          # the jar ends up in build/libs
-./gradlew runClient      # a dev client with Distant Horizons and Biomes O' Plenty
+./gradlew runClient      # a dev client with Voxy, Sodium and Biomes O' Plenty, in run-fabric/
 ./gradlew test
 ```
 

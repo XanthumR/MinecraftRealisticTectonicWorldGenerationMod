@@ -5,7 +5,7 @@ import com.realtectonics.mod.TectonicChunkGenerator;
 import com.realtectonics.sim.PlanetData;
 import com.realtectonics.sim.PlanetSettings;
 import com.realtectonics.sim.Terrain;
-import net.minecraft.client.gui.GuiGraphics;
+import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.gui.components.AbstractSliderButton;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.components.CycleButton;
@@ -14,13 +14,11 @@ import net.minecraft.client.gui.screens.worldselection.CreateWorldScreen;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceKey;
-import net.minecraft.resources.ResourceLocation;
+import net.minecraft.client.gui.screens.worldselection.WorldCreationContext;
+import net.minecraft.client.renderer.RenderPipelines;
+import net.minecraft.resources.Identifier;
 import net.minecraft.world.level.levelgen.WorldOptions;
 import net.minecraft.world.level.levelgen.presets.WorldPreset;
-import net.neoforged.api.distmarker.Dist;
-import net.neoforged.bus.api.SubscribeEvent;
-import net.neoforged.fml.common.EventBusSubscriber;
-import net.neoforged.neoforge.client.event.RegisterPresetEditorsEvent;
 
 import java.util.Arrays;
 import java.util.OptionalLong;
@@ -33,15 +31,13 @@ import java.util.function.DoubleConsumer;
  * The "Customize" screen for Tectonic Planet worlds: a live map of the planet the chosen seed and settings make.
  * The simulation runs on a background thread; the new world reuses its result.
  */
-@EventBusSubscriber(modid = RealTectonics.MODID, value = Dist.CLIENT)
 public final class PlanetScreen extends Screen {
-    static final ResourceKey<WorldPreset> PRESET = ResourceKey.create(Registries.WORLD_PRESET, ResourceLocation.fromNamespaceAndPath(RealTectonics.MODID, "planet"));
+    public static final ResourceKey<WorldPreset> PRESET = ResourceKey.create(Registries.WORLD_PRESET, Identifier.fromNamespaceAndPath(RealTectonics.MODID, "planet"));
     private static final int RESTART_DELAY = 10; // ticks after the last slider change before re-simulating
 
-    @SubscribeEvent
-    static void registerEditor(RegisterPresetEditorsEvent event) {
-        event.register(PRESET, (parent, context) -> new PlanetScreen(parent,
-                context.selectedDimensions().overworld() instanceof TectonicChunkGenerator g ? g.planet() : PlanetSettings.DEFAULT));
+    /** The world-type editor (PresetEditorMixin). */
+    public static Screen create(CreateWorldScreen parent, WorldCreationContext context) {
+        return new PlanetScreen(parent, context.selectedDimensions().overworld() instanceof TectonicChunkGenerator g ? g.planet() : PlanetSettings.DEFAULT);
     }
 
     private record Result(long seed, PlanetSettings settings, PlanetData data, int[] rgb, float landFraction, float peakMetres) {}
@@ -58,7 +54,7 @@ public final class PlanetScreen extends Screen {
     private volatile double progress;
     private volatile Result finished;
     private Result shown;
-    private ResourceLocation textureId;
+    private Identifier textureId;
     private int restartIn = -1;
 
     private PlanetScreen(CreateWorldScreen parent, PlanetSettings settings) {
@@ -80,18 +76,16 @@ public final class PlanetScreen extends Screen {
         addRenderableWidget(new Slider(cx - 155, y, "Plates", 6, 30, settings.plates(), false, true, v -> settings = settings.withPlates((int) v)));
         addRenderableWidget(new Slider(cx + 5, y, "Ocean", 0.5, 0.85, settings.oceanFraction(), true, true, v -> settings = settings.withOceanFraction((float) v)));
         y += 24;
-        addRenderableWidget(CycleButton.<Integer>builder(w -> Component.literal(w < 1024 ? "Small" : w == 1024 ? "Medium" : w == 2048 ? "Large (slow)" : "Huge (~2 min, 4 GB RAM)"))
+        addRenderableWidget(CycleButton.<Integer>builder(w -> Component.literal(w < 1024 ? "Small" : w == 1024 ? "Medium" : w == 2048 ? "Large (slow)" : "Huge (~2 min, 4 GB RAM)"), settings.width())
                 .withValues(Arrays.stream(PlanetSettings.WIDTHS).boxed().toList())
-                .withInitialValue(settings.width())
                 .create(cx - 155, y, 150, 20, Component.literal("Size"), (button, w) -> {
                     settings = settings.withWidth(w);
                     restartIn = RESTART_DELAY;
                 }));
         addRenderableWidget(new Slider(cx + 5, y, "Mountains", 0.5, 2, settings.mountainScale(), true, false, v -> settings = settings.withMountainScale((float) v)));
         y += 24;
-        addRenderableWidget(CycleButton.<Integer>builder(z -> Component.literal("x" + z + (z == 1 ? " (compact)" : "")))
+        addRenderableWidget(CycleButton.<Integer>builder(z -> Component.literal("x" + z + (z == 1 ? " (compact)" : "")), settings.zoom())
                 .withValues(Arrays.stream(PlanetSettings.ZOOMS).boxed().toList())
-                .withInitialValue(settings.zoom())
                 .create(cx - 155, y, 150, 20, Component.literal("World scale"), (button, z) -> settings = settings.withZoom(z)));
         addRenderableWidget(new Slider(cx + 5, y, "Volcanoes", 0, 2, settings.volcanoes(), true, true, v -> settings = settings.withVolcanoes((float) v)));
         y += 24;
@@ -155,21 +149,21 @@ public final class PlanetScreen extends Screen {
     }
 
     private void show(Result r) {
-        textureId = MapScreen.upload("realtectonics_planet_preview", r.rgb, r.data.w, r.data.h, textureId);
+        textureId = MapScreen.upload("planet_preview", r.rgb, r.data.w, r.data.h, textureId);
         shown = r;
     }
 
     @Override
-    public void render(GuiGraphics g, int mouseX, int mouseY, float partialTick) {
-        super.render(g, mouseX, mouseY, partialTick);
-        g.drawCenteredString(font, title, width / 2, 8, 0xFFFFFF);
+    public void extractRenderState(GuiGraphicsExtractor g, int mouseX, int mouseY, float partialTick) {
+        super.extractRenderState(g, mouseX, mouseY, partialTick);
+        g.centeredText(font, title, width / 2, 8, 0xFFFFFFFF);
         int mapW = mapWidth(), mapH = mapW / 2, x = (width - mapW) / 2, y = 24;
-        if (shown != null) g.blit(textureId, x, y, mapW, mapH, 0, 0, shown.data.w, shown.data.h, shown.data.w, shown.data.h);
+        if (shown != null) g.blit(RenderPipelines.GUI_TEXTURED, textureId, x, y, 0, 0, mapW, mapH, shown.data.w, shown.data.h, shown.data.w, shown.data.h);
         else g.fill(x, y, x + mapW, y + mapH, 0xFF101820);
         String status = stale(shown) ? String.format("Simulating planet... %d%%", (int) (progress * 100))
                 : String.format("Seed %d  |  %d%% land  |  highest peak %.1f km, y %d  |  + spawn", seed, Math.round(shown.landFraction * 100),
                 shown.peakMetres / 1000, Terrain.peakY(shown.peakMetres, settings.mountainScale()));
-        g.drawCenteredString(font, status, width / 2, y + mapH - 12, 0xFFFFFF);
+        g.centeredText(font, status, width / 2, y + mapH - 12, 0xFFFFFFFF);
     }
 
     private void apply() {
@@ -182,7 +176,7 @@ public final class PlanetScreen extends Screen {
 
     @Override
     public void onClose() {
-        minecraft.setScreen(parent);
+        minecraft.gui.setScreen(parent);
     }
 
     @Override

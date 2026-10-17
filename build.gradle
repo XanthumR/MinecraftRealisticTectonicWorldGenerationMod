@@ -1,6 +1,6 @@
 plugins {
     id 'application'
-    id 'net.neoforged.moddev' version '2.0.148'
+    id 'net.fabricmc.fabric-loom' version "${loom_version}"
 }
 
 group = 'com.realtectonics'
@@ -8,43 +8,45 @@ version = '0.1.0'
 base { archivesName = 'realtectonics' }
 
 repositories {
-    mavenCentral()
-    maven { url = 'https://api.modrinth.com/maven' } // Sodium, Distant Horizons for dev runs
+    maven { url = 'https://api.modrinth.com/maven' } // the dev client's mods
+}
+
+loom {
+    runs {
+        client { vmArgs '-Xmx8G'; runDir 'run-fabric' } // not run/: its 1.21.1 worlds would be upgraded for good, and its mods are NeoForge's
+        server { runDir 'run-server' } // its own folder: client-only mods would crash a server
+    }
 }
 
 dependencies {
-    // Immersive Portals (immersive-portals-neoforge 6.0.7 + cloth-config) is optional: drop it in run/mods and
-    // walking off the east edge brings you in from the west.
-    // Faster rendering, and far-off terrain drawn as low-detail LODs: the planet's ranges on the horizon.
-    runtimeOnly 'maven.modrinth:distanthorizons:3.3.3-1.21.1'
-    // Biomes O' Plenty for dev runs: new worlds pick its realistic biomes (TectonicBiomeSource "biomesoplenty" pack).
-    runtimeOnly 'maven.modrinth:biomes-o-plenty:BtZKRp69' // version ids: the version numbers are shared with the Forge builds
-    runtimeOnly 'maven.modrinth:terrablender:6e8GCrLb'
-    runtimeOnly 'maven.modrinth:glitchcore:S2TfWrZR'
+    minecraft "com.mojang:minecraft:${project.minecraft_version}"
+    implementation "net.fabricmc:fabric-loader:${project.loader_version}"
+    implementation "net.fabricmc.fabric-api:fabric-api:${project.fabric_api_version}"
+
+    // Dev client only, by Modrinth version id: Voxy draws far-off terrain as LODs (it needs Sodium); Biomes O' Plenty
+    // lets new worlds pick its realistic biomes (TectonicBiomeSource "biomesoplenty" pack).
+    localRuntime 'maven.modrinth:sodium:xJZxADzI'         // mc26.2-0.9.2-fabric
+    localRuntime 'maven.modrinth:voxy:LzyXnE51'           // 0.2.19-beta
+    localRuntime 'maven.modrinth:biomes-o-plenty:MNZPk6V0' // 26.2.0.0.28
+    localRuntime 'maven.modrinth:terrablender:KQix25Qc'
+    localRuntime 'maven.modrinth:glitchcore:SDUCBYRU'
+
     testImplementation platform('org.junit:junit-bom:5.11.4')
     testImplementation 'org.junit.jupiter:junit-jupiter'
     testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
 }
 
-// NeoForge 1.21.1 runs on Java 21
-java.toolchain.languageVersion = JavaLanguageVersion.of(21)
-
-neoForge {
-    version = '21.1.259'
-    runs {
-        client { client()
-		 jvmArguments.add('-Xmx8G')
- }
-        server {
-            server()
-            programArgument '--nogui'
-            gameDirectory = project.file('run-server') // its own folder: client-only mods in run/mods (Sodium, Iris) crash a server
-        }
-    }
-    mods {
-        realtectonics { sourceSet sourceSets.main }
-    }
+processResources {
+    def version = project.version
+    inputs.property 'version', version
+    filesMatching('fabric.mod.json') { expand 'version': version }
 }
+
+// Minecraft 26.x runs on Java 25
+java {
+    toolchain.languageVersion = JavaLanguageVersion.of(25)
+}
+tasks.withType(JavaCompile).configureEach { it.options.release = 25 }
 
 // The standalone simulation preview: gradlew run --args="..."
 application { mainClass = 'com.realtectonics.sim.Prototype' }

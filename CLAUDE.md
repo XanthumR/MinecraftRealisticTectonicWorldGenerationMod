@@ -1,4 +1,8 @@
-# Realistic Tectonic World Generation (NeoForge 1.21.1)
+# Realistic Tectonic World Generation (Fabric, Minecraft 26.2)
+
+This is the `fabric` branch: Fabric Loader 0.20, Fabric API, Minecraft 26.2 (unobfuscated: Mojang's names, nothing
+remapped), Java 25, for official Voxy. The NeoForge 1.21.1 version lives on `main`; the simulation (`sim/`) is the same
+code on both, so port sim changes across with `git cherry-pick`.
 
 A Minecraft mod that simulates a planet (plates → erosion and rivers → climate and biomes) and builds terrain from it.
 The world is a cylinder: X wraps east-west, the poles are a barrier. The user wants **a balance of realism and
@@ -29,14 +33,20 @@ gameplay** and play-tests in the client themselves.
     `relaxedColumn()` (what the game uses, format 29+) runs block-scale rockfall over cached 256-block tiles (RELAX_TILE; output is identical for any tile size, `tools/relaxhash.jsh` proves it) (computed once, rows in parallel, early stop); seamless
     because updates are synchronous and the margin exceeds the rounds. From format 33 it first cuts gullies by water flow (`gullies()`: D8 routing, from 41 spread to all lower neighbours and cut only above the local mean, area gathered from GULLY_REACH blocks upslope only, so tiles stay seam-exact; `hillshade.jsh` shows them). Check it with `tools/rockfall.jsh` (seams 0) and `tools/overshoot.jsh` (rubble never above its source: 0). Rate per neighbour must stay <= 1/16 or it grows spires (format 29 bug).
 - `src/main/java/com/realtectonics/mod`:
-  - `TectonicChunkGenerator`: blocks, surfaces, snow, beardifier, cave sealing, post-decoration snow pass. `moddedGround()`
+  - `TectonicChunkGenerator`: blocks, surfaces, snow, beardifier, cave sealing, post-decoration snow pass. It extends
+    `ChunkGenerator` and holds a vanilla `NoiseBasedChunkGenerator` (final in 26.x) only for carvers and first mobs. `moddedGround()`
     lays BOP's own ground (podzol, coarse dirt, orange sand, terracotta bands, gravel) in its biomes, over plain grass and sand only.
   - `TectonicBiomeSource`: maps sim biomes to vanilla biomes, or with the `biomesoplenty` pack to realistic Biomes O' Plenty
     biomes: `biomesoplenty` one per climate (`biomesOPlenty()`), `biomesoplenty_varied` several per climate picked by
     `Terrain.variety` in ~340-block patches (`varied()`). The preset says `"pack": "auto"` (= varied when BOP is loaded), saved resolved at world creation; worlds without the field stay
     vanilla. Biome mods register into vanilla's multi-noise source, which ours replaces, so they appear only through this table.
-  - `RealTectonics`: loads or saves `planet.bin` in the world folder.
-  - `client/`: `PlanetScreen` sliders, `MapScreen`.
+  - `RealTectonics` (Fabric `ModInitializer`): registers the generator and biome source, loads or saves `planet.bin`
+    on `SERVER_STARTING`, keeps players off the poles. `MapTeleport`: the map's teleport packet (Fabric networking).
+  - `client/`: `RealTectonicsClient` (map key), `PlanetScreen` sliders, `MapScreen`. Screens draw through 26.x's
+    `GuiGraphicsExtractor` in `extractRenderState`.
+  - `mixin/PresetEditorMixin`: adds the world type's "Customize" screen (Fabric API has no hook for preset editors).
+  - BOP biome ids are checked against the mods' data files before lookup (`TectonicBiomeSource.exists`): on 26.x asking
+    the registry for a missing biome (BOP 26.2 dropped `grassland`, `aspen_glade`) stops the world from loading.
 
 ## The user's principle: simulate, don't stamp
 The user wants **most things simulated**: features should come out of the planet simulation (plates, erosion, lakes,
@@ -69,8 +79,9 @@ come from `markLakes`.
 - Speed: `tools/genab.sh` (whole pipeline on the dev server, ~92 chunks/s; Distant Horizons takes ~45% of the CPU there), `relaxhash.jsh`
   (terrain area time and an output hash that must not change in pure speed work). Profile with `jcmd <pid> JFR.start` or the
   `jdk.jfr.Recording` API inside jshell (the jshell JVM is killed, so -XX:StartFlightRecording never dumps).
+- Gradle needs Java 25: prefix commands with `JAVA_HOME="/c/Program Files/Java/jdk-25.0.4"` (Gradle 9.8.1, Loom 1.19.1).
 - Compile: `./gradlew compileJava -q`. Tests: `./gradlew test -q`. Jar: `./gradlew build -q`.
-- jshell: `"/c/Program Files/Java/jdk-21.0.12/bin/jshell" -R-Xmx6g [-R-Dkey=val] --class-path build/classes/java/main tools/X.jsh`
+- jshell: `"/c/Program Files/Java/jdk-25.0.4/bin/jshell" -R-Xmx6g [-R-Dkey=val] --class-path build/classes/java/main tools/X.jsh`
   - Most scripts build seed 777 at `PlanetSettings.DEFAULT` with `new Terrain(d, 777, 1, 1, 2)`.
   - Set `d.format = N` before building a `Terrain` to compare before and after.
 - Multi-line edits: a Python script that starts with `exec(open('tools/edit_glacier.py').read().split("C = ")[0])`, then calls `edit(path, [(old, new), ...])`.
@@ -83,14 +94,15 @@ come from `markLakes`.
 - Spill checks must count glacier ice as a wall (`max(ground, water, ice)`). `falls.jsh` baseline is 12 column edges on seed 777 since the blocking, monsoon-regime, coast-wind and plateau-warmth climate changes (4 and 23 before; rivers move with the rain) (most along river reaches whose banks stand 1-2
   blocks under the water: open, perched banks); `lakeleak.jsh` 0.
 - Dev server, for in-game checks:
-  - It runs in `run-server/`, because Sodium and Iris in `run/mods` crash a server.
+  - It runs in `run-server/` (client-only mods would crash a server). The dev client runs in `run-fabric/`, not `run/`:
+    `run/` holds the NeoForge version's 1.21.1 worlds, which 26.2 would upgrade for good, and NeoForge mod jars.
   - Append `enable-rcon=true`, `rcon.password=dev` and `rcon.port=25575` to `run-server/server.properties`.
   - Start it with `./gradlew runServer > run/gradle-server.log 2>&1 &` and wait for `Done (`.
   - Send commands with `python tools/rcon.py "cmd"` (`forceload add`, `execute if block ...`). `tools/topblock.py x z` reads a column's top block.
   - Afterwards: `stop`, remove the rcon lines, and `rm -rf run-server/world`.
   - **Never kill the user's client**; only stop processes I started.
-- Dev mods: Distant Horizons and Biomes O' Plenty (with TerraBlender, GlitchCore; pinned by Modrinth version id, since
-  version numbers are shared with the Forge builds) come from `build.gradle` runtimeOnly. Sodium 0.8.12 and Iris 1.8.14 sit in `run/mods`. Don't add them to both.
+- Dev mods (`build.gradle` `localRuntime`, by Modrinth version id): Sodium and Voxy (far terrain as LODs), Biomes O' Plenty
+  with TerraBlender and GlitchCore. Voxy only draws chunks that were generated; Chunky pregenerates them.
 
 ## Style
 - Ponytail: minimal code, reuse helpers in `Terrain` (`noise`/`fine`/`cubic`/`bilinear`/`smoothstep`/`hash01`/`wrapBlocks`/`cell`).

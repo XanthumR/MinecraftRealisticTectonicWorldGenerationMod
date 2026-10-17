@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "id": "realtectonics",
+  "version": "${version}",
+  "name": "Realistic Tectonics",
+  "description": "A planet shaped by simulated plate tectonics, erosion and climate.",
+  "authors": ["Rıdvan Barış Özden"],
+  "contact": { "sources": "https://github.com/XanthumR/MinecraftRealisticTectonicWorldGenerationMod" },
+  "license": "All Rights Reserved",
+  "environment": "*",
+  "entrypoints": {
+    "main": ["com.realtectonics.mod.RealTectonics"],
+    "client": ["com.realtectonics.mod.client.RealTectonicsClient"]
+  },
+  "mixins": [{ "config": "realtectonics.client.mixins.json", "environment": "client" }],
+  "depends": {
+    "fabricloader": ">=0.20.0",
+    "minecraft": "~26.2",
+    "java": ">=25",
+    "fabric-api": "*"
+  }
+}

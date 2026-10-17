@@ -1,6 +1,6 @@
 package com.realtectonics.mod;
 
-import net.minecraft.resources.ResourceLocation;
+import net.minecraft.resources.Identifier;
 import net.minecraft.core.QuartPos;
 import net.minecraft.core.registries.BuiltInRegistries;
 import com.mojang.serialization.Codec;
@@ -21,14 +21,14 @@ import net.minecraft.world.level.WorldGenLevel;
 import net.minecraft.world.level.biome.BiomeManager;
 import net.minecraft.world.level.biome.BiomeSource;
 import net.minecraft.world.level.block.Blocks;
-import net.minecraft.world.level.block.SnowyDirtBlock;
+import net.minecraft.world.level.block.SnowyBlock;
+import net.minecraft.server.level.WorldGenRegion;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.chunk.ChunkAccess;
 import net.minecraft.world.level.chunk.ChunkGenerator;
 import net.minecraft.world.level.chunk.LevelChunkSection;
 import net.minecraft.world.level.levelgen.Beardifier;
 import net.minecraft.world.level.levelgen.DensityFunction;
-import net.minecraft.world.level.levelgen.GenerationStep;
 import net.minecraft.world.level.levelgen.Heightmap;
 import net.minecraft.world.level.levelgen.NoiseBasedChunkGenerator;
 import net.minecraft.world.level.levelgen.NoiseGeneratorSettings;
@@ -39,12 +39,12 @@ import java.util.List;
 import java.util.concurrent.CompletableFuture;
 
 /**
- * Builds terrain columns straight from the simulated planet. Extends the noise generator only to keep
- * vanilla carvers (caves, ravines); its settings (data/realtectonics/worldgen/noise_settings/planet.json)
+ * Builds terrain columns straight from the simulated planet. A vanilla noise generator inside it only carves
+ * caves and ravines and spawns the first animals; its settings (data/realtectonics/worldgen/noise_settings/planet.json)
  * have sea_level -64 so those caves stay dry, and applyCarvers seals caves away from surface water.
  * The real sea level comes from getSeaLevel().
  */
-public final class TectonicChunkGenerator extends NoiseBasedChunkGenerator {
+public final class TectonicChunkGenerator extends ChunkGenerator {
     /** Saved in the world's generator data, like a superflat world's layers. */
     static final Codec<PlanetSettings> PLANET_CODEC = RecordCodecBuilder.create(i -> i.group(
             Codec.INT.validate(w -> w >= 256 && w <= 4096 && w % 256 == 0 ? DataResult.success(w) : DataResult.error(() -> "Planet width must be a multiple of 256 between 256 and 4096: " + w))
@@ -62,7 +62,7 @@ public final class TectonicChunkGenerator extends NoiseBasedChunkGenerator {
 
     public static final MapCodec<TectonicChunkGenerator> CODEC = RecordCodecBuilder.mapCodec(i -> i.group(
             BiomeSource.CODEC.fieldOf("biome_source").forGetter(ChunkGenerator::getBiomeSource),
-            NoiseGeneratorSettings.CODEC.fieldOf("settings").forGetter(NoiseBasedChunkGenerator::generatorSettings),
+            NoiseGeneratorSettings.CODEC.fieldOf("settings").forGetter(g -> g.settings),
             PLANET_CODEC.optionalFieldOf("planet", PlanetSettings.DEFAULT).forGetter(TectonicChunkGenerator::planet)
     ).apply(i, TectonicChunkGenerator::new));
 
@@ -102,9 +102,9 @@ public final class TectonicChunkGenerator extends NoiseBasedChunkGenerator {
             {ANDESITE, ANDESITE, TUFF, STONE, BASALT, DIORITE, STONE},                              // ARC
             {SANDSTONE, STONE, CALCITE, SANDSTONE, STONE, Blocks.SMOOTH_SANDSTONE.defaultBlockState(), STONE}}; // BASIN
     private static final BlockState[] ARID_LAYERS = {
-            Blocks.TERRACOTTA.defaultBlockState(), Blocks.ORANGE_TERRACOTTA.defaultBlockState(), Blocks.YELLOW_TERRACOTTA.defaultBlockState(),
-            Blocks.TERRACOTTA.defaultBlockState(), Blocks.RED_TERRACOTTA.defaultBlockState(), Blocks.WHITE_TERRACOTTA.defaultBlockState(),
-            Blocks.BROWN_TERRACOTTA.defaultBlockState(), Blocks.LIGHT_GRAY_TERRACOTTA.defaultBlockState(), Blocks.SANDSTONE.defaultBlockState()};
+            Blocks.TERRACOTTA.defaultBlockState(), Blocks.DYED_TERRACOTTA.orange().defaultBlockState(), Blocks.DYED_TERRACOTTA.yellow().defaultBlockState(),
+            Blocks.TERRACOTTA.defaultBlockState(), Blocks.DYED_TERRACOTTA.red().defaultBlockState(), Blocks.DYED_TERRACOTTA.white().defaultBlockState(),
+            Blocks.DYED_TERRACOTTA.brown().defaultBlockState(), Blocks.DYED_TERRACOTTA.lightGray().defaultBlockState(), Blocks.SANDSTONE.defaultBlockState()};
     static final int ARID_DEPTH = 48;  // terracotta bands only near the surface, so ores still have stone deeper down
     static final int CLIFF_STEP = 4;   // blocks up in one step that make bare rock
     static final float SNOW_SLOPE = 0.8f, SNOW_SHADE = 1.2f, SNOW_PATCH = 1.0f, SNOW_SCOUR = 0.5f; // see snowStays
@@ -114,14 +114,14 @@ public final class TectonicChunkGenerator extends NoiseBasedChunkGenerator {
     static final int VOLCANIC_DEPTH = 40; // lava flows and ash layered over the bedrock below
 
     private static final Surface GRASS = new Surface(Blocks.GRASS_BLOCK.defaultBlockState(), Blocks.DIRT.defaultBlockState(), false),
-            SNOWY_GRASS = new Surface(Blocks.GRASS_BLOCK.defaultBlockState().setValue(SnowyDirtBlock.SNOWY, true), Blocks.DIRT.defaultBlockState(), true),
+            SNOWY_GRASS = new Surface(Blocks.GRASS_BLOCK.defaultBlockState().setValue(SnowyBlock.SNOWY, true), Blocks.DIRT.defaultBlockState(), true),
             PODZOL = new Surface(Blocks.PODZOL.defaultBlockState(), Blocks.DIRT.defaultBlockState(), false),
             SAND = new Surface(Blocks.SAND.defaultBlockState(), Blocks.SANDSTONE.defaultBlockState(), false),
             BEACH = new Surface(Blocks.SAND.defaultBlockState(), Blocks.SAND.defaultBlockState(), false),
             GRAVEL = new Surface(Blocks.GRAVEL.defaultBlockState(), Blocks.GRAVEL.defaultBlockState(), false),
             SPRING = new Surface(Blocks.SOUL_SAND.defaultBlockState(), Blocks.CALCITE.defaultBlockState(), false),
-            SINTER = new Surface(Blocks.WHITE_TERRACOTTA.defaultBlockState(), Blocks.CALCITE.defaultBlockState(), false),
-            SINTER_STAINED = new Surface(Blocks.ORANGE_TERRACOTTA.defaultBlockState(), Blocks.CALCITE.defaultBlockState(), false), // bacterial mats
+            SINTER = new Surface(Blocks.DYED_TERRACOTTA.white().defaultBlockState(), Blocks.CALCITE.defaultBlockState(), false),
+            SINTER_STAINED = new Surface(Blocks.DYED_TERRACOTTA.orange().defaultBlockState(), Blocks.CALCITE.defaultBlockState(), false), // bacterial mats
             RED_SAND = new Surface(Blocks.RED_SAND.defaultBlockState(), Blocks.RED_SANDSTONE.defaultBlockState(), false),
             COARSE = new Surface(Blocks.COARSE_DIRT.defaultBlockState(), Blocks.DIRT.defaultBlockState(), false),
             SAND_BANK = new Surface(Blocks.SAND.defaultBlockState(), Blocks.SAND.defaultBlockState(), false),
@@ -133,10 +133,14 @@ public final class TectonicChunkGenerator extends NoiseBasedChunkGenerator {
             SCREE_STONE = new Surface(Blocks.COBBLESTONE.defaultBlockState(), Blocks.GRAVEL.defaultBlockState(), false);
 
     private final PlanetSettings planet;
+    private final Holder<NoiseGeneratorSettings> settings;
+    private final NoiseBasedChunkGenerator vanilla; // caves, ravines and first animals; it is final, so held rather than extended
 
     public TectonicChunkGenerator(BiomeSource biomes, Holder<NoiseGeneratorSettings> settings, PlanetSettings planet) {
-        super(biomes, settings);
+        super(biomes);
         this.planet = planet;
+        this.settings = settings;
+        this.vanilla = new NoiseBasedChunkGenerator(biomes, settings);
     }
 
     public PlanetSettings planet() {
@@ -144,7 +148,7 @@ public final class TectonicChunkGenerator extends NoiseBasedChunkGenerator {
     }
 
     public TectonicChunkGenerator withPlanet(PlanetSettings planet) {
-        return new TectonicChunkGenerator(getBiomeSource(), generatorSettings(), planet);
+        return new TectonicChunkGenerator(getBiomeSource(), settings, planet);
     }
 
     @Override
@@ -169,7 +173,7 @@ public final class TectonicChunkGenerator extends NoiseBasedChunkGenerator {
 
     @Override
     public CompletableFuture<ChunkAccess> fillFromNoise(Blender blender, RandomState random, StructureManager structures, ChunkAccess chunk) {
-        int x0 = chunk.getPos().getMinBlockX(), z0 = chunk.getPos().getMinBlockZ(), minY = chunk.getMinBuildHeight();
+        int x0 = chunk.getPos().getMinBlockX(), z0 = chunk.getPos().getMinBlockZ(), minY = chunk.getMinY();
         Terrain.Column[] cols = columns(chunk, structures);
 
         Heightmap oceanFloor = chunk.getOrCreateHeightmapUnprimed(Heightmap.Types.OCEAN_FLOOR_WG);
@@ -196,10 +200,10 @@ public final class TectonicChunkGenerator extends NoiseBasedChunkGenerator {
                 boolean snowLayer = terrain.snowLine
                         ? !wet && !hot && !glacier && s.top != null && !warmGround(s) && terrain.snowTemperature(x0 + lx, z0 + lz, c.ground()) < 0
                         : s.snowLayer;
-                if (terrain.snowLine && s.top != null && s.top.hasProperty(SnowyDirtBlock.SNOWY))
-                    s = new Surface(s.top.setValue(SnowyDirtBlock.SNOWY, snowLayer), s.filler, snowLayer);
+                if (terrain.snowLine && s.top != null && s.top.hasProperty(SnowyBlock.SNOWY))
+                    s = new Surface(s.top.setValue(SnowyBlock.SNOWY, snowLayer), s.filler, snowLayer);
                 // Snow, ice or a structure's foundation can lift the top past the build limit: never write above it.
-                int top = Math.min(wet ? c.water() : hot ? c.lava() : glacier ? c.ice() : c.ground() + (snowLayer ? 1 : 0), chunk.getMaxBuildHeight() - 1);
+                int top = Math.min(wet ? c.water() : hot ? c.lava() : glacier ? c.ice() : c.ground() + (snowLayer ? 1 : 0), chunk.getMaxY());
 
                 LevelChunkSection section = null;
                 int sectionIndex = -1;
@@ -221,7 +225,7 @@ public final class TectonicChunkGenerator extends NoiseBasedChunkGenerator {
                     section.setBlockState(lx, y & 15, lz, state, false);
                 }
                 // Where a river steps down a block, let the edge water flow when the chunk loads: rapids, not a frozen wall.
-                if (wet && lowestNeighbourTop(cols, i) < c.water()) chunk.markPosForPostprocessing(new BlockPos(x0 + lx, c.water(), z0 + lz));
+                if (wet && lowestNeighbourTop(cols, i) < c.water()) chunk.markPosForPostProcessing(new BlockPos(x0 + lx, c.water(), z0 + lz));
                 BlockState surfaceBlock = s.top == null ? rock(c, c.ground()) : s.top;
                 oceanFloor.update(lx, glacier ? c.ice() : c.ground(), lz, glacier ? PACKED_ICE : surfaceBlock);
                 worldSurface.update(lx, top, lz, top == c.ground() ? surfaceBlock : wet ? WATER : hot ? LAVA : glacier ? PACKED_ICE : SNOW);
@@ -279,10 +283,14 @@ public final class TectonicChunkGenerator extends NoiseBasedChunkGenerator {
     }
 
     @Override
-    public void applyCarvers(WorldGenRegion region, long seed, RandomState random, BiomeManager biomes, StructureManager structures,
-                             ChunkAccess chunk, GenerationStep.Carving step) {
-        super.applyCarvers(region, seed, random, biomes, structures, chunk, step);
+    public void applyCarvers(WorldGenRegion region, long seed, RandomState random, BiomeManager biomes, StructureManager structures, ChunkAccess chunk) {
+        vanilla.applyCarvers(region, seed, random, biomes, structures, chunk);
         sealCavesFromWater(chunk, structures);
+    }
+
+    @Override
+    public void spawnOriginalMobs(WorldGenRegion region) {
+        vanilla.spawnOriginalMobs(region);
     }
 
     /**
@@ -300,16 +308,16 @@ public final class TectonicChunkGenerator extends NoiseBasedChunkGenerator {
                 Terrain.Column c = cols[i];
                 int nearFluid = Math.max(Math.max(fluid(c), Math.max(fluid(cols[i - 1]), fluid(cols[i + 1]))),
                         Math.max(fluid(cols[i - 18]), fluid(cols[i + 18])));
-                int top = Math.min(Math.max(fluid(c), Math.min(nearFluid, c.ground())), chunk.getMaxBuildHeight() - 1);
+                int top = Math.min(Math.max(fluid(c), Math.min(nearFluid, c.ground())), chunk.getMaxY());
                 // From format 43 only where air can touch the fluid: water and lava lie above the ground, so from the
                 // lowest ground here or beside up. Caves deeper down stay, closed off and dry, instead of being filled.
-                int bottom = RealTectonics.terrain().fastMath ? Math.max(chunk.getMinBuildHeight() + 1, Math.min(Math.min(c.ground(),
-                        Math.min(cols[i - 1].ground(), cols[i + 1].ground())), Math.min(cols[i - 18].ground(), cols[i + 18].ground()))) : chunk.getMinBuildHeight() + 1;
+                int bottom = RealTectonics.terrain().fastMath ? Math.max(chunk.getMinY() + 1, Math.min(Math.min(c.ground(),
+                        Math.min(cols[i - 1].ground(), cols[i + 1].ground())), Math.min(cols[i - 18].ground(), cols[i + 18].ground()))) : chunk.getMinY() + 1;
                 for (int y = bottom; y <= top; y++)
                     if (chunk.getBlockState(pos.set(x0 + lx, y, z0 + lz)).isAir())
                         chunk.setBlockState(pos, y <= c.ground() ? rock(c, y)
                                 : c.lava() != Terrain.Column.NO_WATER ? LAVA
-                                : frozen(RealTectonics.terrain(), c, x0 + lx, z0 + lz) && y == c.water() ? ICE : WATER, false);
+                                : frozen(RealTectonics.terrain(), c, x0 + lx, z0 + lz) && y == c.water() ? ICE : WATER);
             }
     }
 
@@ -366,9 +374,9 @@ public final class TectonicChunkGenerator extends NoiseBasedChunkGenerator {
 
     private static final Surface[] RAINFOREST_BANDS = { // BOP's rocky rainforest: banded clays showing through
             new Surface(Blocks.TERRACOTTA.defaultBlockState(), Blocks.TERRACOTTA.defaultBlockState(), false),
-            new Surface(Blocks.LIGHT_GRAY_TERRACOTTA.defaultBlockState(), Blocks.TERRACOTTA.defaultBlockState(), false),
-            new Surface(Blocks.CYAN_TERRACOTTA.defaultBlockState(), Blocks.TERRACOTTA.defaultBlockState(), false),
-            new Surface(Blocks.LIGHT_BLUE_TERRACOTTA.defaultBlockState(), Blocks.TERRACOTTA.defaultBlockState(), false)};
+            new Surface(Blocks.DYED_TERRACOTTA.lightGray().defaultBlockState(), Blocks.TERRACOTTA.defaultBlockState(), false),
+            new Surface(Blocks.DYED_TERRACOTTA.cyan().defaultBlockState(), Blocks.TERRACOTTA.defaultBlockState(), false),
+            new Surface(Blocks.DYED_TERRACOTTA.lightBlue().defaultBlockState(), Blocks.TERRACOTTA.defaultBlockState(), false)};
 
     /**
      * Biomes O' Plenty's own ground in its biomes, after its surface rules (BOPSurfaceRuleData, 1.21.1): this generator
@@ -379,13 +387,13 @@ public final class TectonicChunkGenerator extends NoiseBasedChunkGenerator {
     private static Surface moddedGround(ChunkAccess chunk, Surface s, Terrain.Column c, int x, int z) {
         if (s != GRASS && s != BEACH) return s;
         var key = chunk.getNoiseBiome(QuartPos.fromBlock(x), QuartPos.fromBlock(c.ground()), QuartPos.fromBlock(z)).unwrapKey();
-        if (key.isEmpty() || !key.get().location().getNamespace().equals("biomesoplenty")) return s;
+        if (key.isEmpty() || !key.get().identifier().getNamespace().equals("biomesoplenty")) return s;
         float patch = RealTectonics.terrain().patch(x, z);
-        return switch (key.get().location().getPath()) {
+        return switch (key.get().identifier().getPath()) {
             case "redwood_forest" -> s == GRASS ? PODZOL : s;                                  // a carpet of needles everywhere
             case "old_growth_woodland" -> s == GRASS && patch > 0.3f ? COARSE : s;             // bare patches under the old trees (~10%)
             case "lush_savanna" -> { // red-orange soil showing through; looked up here, as BOP registers its blocks after this class loads
-                BlockState orange = BuiltInRegistries.BLOCK.get(ResourceLocation.fromNamespaceAndPath("biomesoplenty", "orange_sand")).defaultBlockState();
+                BlockState orange = BuiltInRegistries.BLOCK.getValue(Identifier.fromNamespaceAndPath("biomesoplenty", "orange_sand")).defaultBlockState();
                 yield s == GRASS && patch > 0.24f && !orange.isAir() ? new Surface(orange, Blocks.DIRT.defaultBlockState(), false) : s; // ~15%
             }
             case "rocky_rainforest" -> s == GRASS && patch > 0.09f // ~35%, in bands as BOP has them
@@ -462,14 +470,14 @@ public final class TectonicChunkGenerator extends NoiseBasedChunkGenerator {
                     BlockState under = level.getBlockState(below.set(x, y - 1, z));
                     if (!cold || bareRock(under)) {
                         level.setBlock(pos, AIR, 2);
-                        if (under.hasProperty(SnowyDirtBlock.SNOWY)) level.setBlock(below, under.setValue(SnowyDirtBlock.SNOWY, false), 2);
+                        if (under.hasProperty(SnowyBlock.SNOWY)) level.setBlock(below, under.setValue(SnowyBlock.SNOWY, false), 2);
                     }
                 } else if (b.is(Blocks.ICE)) {
                     if (!cold) level.setBlock(pos, WATER, 2);
                 } else if (cold && b.getFluidState().isEmpty() && !bareRock(b) && level.getBlockState(below.set(x, y + 1, z)).isAir()
                         && SNOW.canSurvive(level, below)) {
                     level.setBlock(below, SNOW, 2);
-                    if (b.hasProperty(SnowyDirtBlock.SNOWY)) level.setBlock(pos, b.setValue(SnowyDirtBlock.SNOWY, true), 2);
+                    if (b.hasProperty(SnowyBlock.SNOWY)) level.setBlock(pos, b.setValue(SnowyBlock.SNOWY, true), 2);
                 }
             }
     }
@@ -511,10 +519,10 @@ public final class TectonicChunkGenerator extends NoiseBasedChunkGenerator {
         Terrain.Column c = RealTectonics.terrain().column(x, z);
         BlockState[] states = new BlockState[level.getHeight()];
         for (int i = 0; i < states.length; i++) {
-            int y = level.getMinBuildHeight() + i;
+            int y = level.getMinY() + i;
             states[i] = y <= c.ground() ? STONE : y <= c.water() ? WATER : y <= c.ice() ? PACKED_ICE : AIR;
         }
-        return new NoiseColumn(level.getMinBuildHeight(), states);
+        return new NoiseColumn(level.getMinY(), states);
     }
 
     @Override

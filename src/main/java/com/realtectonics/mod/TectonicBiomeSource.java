@@ -10,10 +10,10 @@ import net.minecraft.core.QuartPos;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.resources.RegistryOps;
 import net.minecraft.resources.ResourceKey;
-import net.minecraft.resources.ResourceLocation;
+import net.minecraft.resources.Identifier;
 import net.minecraft.world.level.biome.BiomeSource;
 import net.minecraft.world.level.biome.Climate;
-import net.neoforged.fml.ModList;
+import net.fabricmc.loader.api.FabricLoader;
 
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -52,16 +52,26 @@ public final class TectonicBiomeSource extends BiomeSource {
     });
 
     public TectonicBiomeSource(HolderGetter<net.minecraft.world.level.biome.Biome> registry, String pack) {
-        this.pack = AUTO.equals(pack) ? ModList.get().isLoaded(BOP) ? BOP_VARIED : VANILLA : pack;
+        this.pack = AUTO.equals(pack) ? FabricLoader.getInstance().isModLoaded(BOP) ? BOP_VARIED : VANILLA : pack;
         for (Biome b : Biome.values()) {
             List<String> ids = BOP_VARIED.equals(this.pack) ? varied(b)
                     : BOP.equals(this.pack) && biomesOPlenty(b) != null ? List.of(BOP + ":" + biomesOPlenty(b)) : List.of();
             List<Holder<net.minecraft.world.level.biome.Biome>> found = new ArrayList<>();
-            for (String id : ids) registry.get(ResourceKey.create(Registries.BIOME, ResourceLocation.parse(id))).ifPresent(found::add);
+            for (String id : ids) if (exists(id)) registry.get(ResourceKey.create(Registries.BIOME, Identifier.parse(id))).ifPresent(found::add);
             if (found.isEmpty()) // missing mod: the vanilla biome stands in
-                found.add(registry.getOrThrow(ResourceKey.create(Registries.BIOME, ResourceLocation.withDefaultNamespace(vanilla(b)))));
+                found.add(registry.getOrThrow(ResourceKey.create(Registries.BIOME, Identifier.withDefaultNamespace(vanilla(b)))));
             biomes.put(b, found);
         }
+    }
+
+    /**
+     * Whether a biome's definition ships with Minecraft or a loaded mod. Asking the registry for one that doesn't
+     * (a mod renamed or dropped it) binds an empty entry, and the world fails to load on 26.x.
+     * ponytail: mods' and vanilla's own data only, not biomes a world's datapack adds
+     */
+    private static boolean exists(String id) {
+        Identifier i = Identifier.parse(id);
+        return TectonicBiomeSource.class.getClassLoader().getResource("data/" + i.getNamespace() + "/worldgen/biome/" + i.getPath() + ".json") != null;
     }
 
     /**
