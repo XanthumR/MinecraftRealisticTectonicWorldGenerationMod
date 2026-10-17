@@ -175,6 +175,7 @@ public final class TectonicChunkGenerator extends ChunkGenerator {
     public CompletableFuture<ChunkAccess> fillFromNoise(Blender blender, RandomState random, StructureManager structures, ChunkAccess chunk) {
         int x0 = chunk.getPos().getMinBlockX(), z0 = chunk.getPos().getMinBlockZ(), minY = chunk.getMinY();
         Terrain.Column[] cols = columns(chunk, structures);
+        int minSection = chunk.getMinSection();
 
         Heightmap oceanFloor = chunk.getOrCreateHeightmapUnprimed(Heightmap.Types.OCEAN_FLOOR_WG);
         Heightmap worldSurface = chunk.getOrCreateHeightmapUnprimed(Heightmap.Types.WORLD_SURFACE_WG);
@@ -217,7 +218,7 @@ public final class TectonicChunkGenerator extends ChunkGenerator {
                             : glacier ? (y == c.ice() && c.cover() == Terrain.Cover.MORAINE ? MORAINE
                                     : c.ice() - y >= BLUE_ICE_DEPTH || y == c.ice() && c.cover() == Terrain.Cover.BARE_ICE ? BLUE_ICE : PACKED_ICE)
                             : SNOW;
-                    int index = chunk.getSectionIndex(y);
+                    int index = (y >> 4) - minSection; // chunk.getSectionIndex, without asking the chunk for its floor every block
                     if (index != sectionIndex) {
                         section = chunk.getSection(index);
                         sectionIndex = index;

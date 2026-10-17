@@ -76,6 +76,7 @@ public final class Terrain {
     static final float ICE_EDGE = 12;     // blocks below the land the ice surface sinks at cells without ice, so glaciers thin to their edges
     static final float ICE_SUMMER_MAX = 15; // °C: summers this warm melt any glacier tongue that reaches them
     static final float LAKE_SILL = 0.25f;   // cells: width of the rock sill between two lakes at different levels
+    static final int BASE_BLOCK = 64, BASE_CACHE = 192; // real blocks per side of a shared square of plain columns (a power of two); squares kept (at most ~38 MB; 512 was no faster)
     static final int RELAX_TILE = 256, RELAX_STEPS = 23, RELAX_CACHE = 24; // blocks per rockfall tile (512 halves the margin overhead but 6 cached tiles thrash under parallel wide generation, and 16 cost ~250 MB; no whole-pipeline gain); rounds of rockfall (the tile margin is one more); tiles kept
     static final float RELAX_TALUS = 2, RELAX_RATE = 0.2f, SCREE_FALLEN = 4; // blocks up per block across that rock stands; share of the excess falling per round; blocks of rubble that make scree
     static final float RELAX_HARDNESS = 0.45f; // how much rock strength varies: the steepest stand about twice the weakest
@@ -209,6 +210,8 @@ public final class Terrain {
     private final float[] bay, silt;      // format 37: land mask blurred wide (above 0.5 in a bay); river sand reaching the coast
     private final java.util.concurrent.ConcurrentHashMap<Long, java.util.concurrent.CompletableFuture<Column[]>> relaxedTiles = new java.util.concurrent.ConcurrentHashMap<>();
     private final java.util.concurrent.ConcurrentLinkedQueue<Long> tileOrder = new java.util.concurrent.ConcurrentLinkedQueue<>();
+    private final java.util.concurrent.ConcurrentHashMap<Long, java.util.concurrent.CompletableFuture<Column[]>> baseBlocks = new java.util.concurrent.ConcurrentHashMap<>();
+    private final java.util.concurrent.ConcurrentLinkedQueue<Long> baseOrder = new java.util.concurrent.ConcurrentLinkedQueue<>();
     private final float[] iceTop;         // per cell: the glacier ice surface in blocks, below the ground where there is none (format 27)
     private final float[] glacier;        // per cell: today's glacier ice, blocks thick (format 23)
     private final boolean[] merged;       // per cell: ice here comes from two glaciers that joined upstream, so a medial moraine runs on it (format 40)
@@ -594,22 +597,43 @@ public final class Terrain {
 
     /** A relaxed tile, computed once: threads asking for one being computed wait for it instead of repeating it. */
     private Column[] tile(int tx, int tz) {
-        long key = (long) tx << 32 | (tz & 0xffffffffL);
-        java.util.concurrent.CompletableFuture<Column[]> f = relaxedTiles.get(key);
+        return cached(relaxedTiles, tileOrder, RELAX_CACHE, tx, tz, () -> relaxTile(tx * RELAX_TILE, tz * RELAX_TILE));
+    }
+
+    /**
+     * The plain columns (before rockfall) of a BASE_BLOCK square, computed once. A rockfall tile works on itself and a
+     * wide margin, which the tiles beside it also cover: before, each computed those columns again, 2.2 times the
+     * tile's own. Columns depend only on their position, so sharing them changes nothing.
+     */
+    private Column[] baseBlock(int bx, int bz) {
+        return cached(baseBlocks, baseOrder, BASE_CACHE, bx, bz, () -> {
+            Column[] b = new Column[BASE_BLOCK * BASE_BLOCK];
+            for (int z = 0; z < BASE_BLOCK; z++)
+                for (int x = 0; x < BASE_BLOCK; x++) b[x + z * BASE_BLOCK] = column(bx * BASE_BLOCK + x, bz * BASE_BLOCK + z);
+            return b;
+        });
+    }
+
+    /** Computed once per key: threads asking for one being computed wait for it instead of repeating it. */
+    private static Column[] cached(java.util.concurrent.ConcurrentHashMap<Long, java.util.concurrent.CompletableFuture<Column[]>> map,
+                                   java.util.concurrent.ConcurrentLinkedQueue<Long> order, int limit, int kx, int kz,
+                                   java.util.function.Supplier<Column[]> compute) {
+        long key = (long) kx << 32 | (kz & 0xffffffffL);
+        java.util.concurrent.CompletableFuture<Column[]> f = map.get(key);
         if (f == null) {
             java.util.concurrent.CompletableFuture<Column[]> mine = new java.util.concurrent.CompletableFuture<>();
-            f = relaxedTiles.putIfAbsent(key, mine);
+            f = map.putIfAbsent(key, mine);
             if (f == null) {
                 f = mine;
-                tileOrder.add(key);
-                while (tileOrder.size() > RELAX_CACHE) { // ponytail: oldest-first eviction, not least-recently-used; fine while chunks arrive in rough order
-                    Long old = tileOrder.poll();
-                    if (old != null) relaxedTiles.remove(old);
+                order.add(key);
+                while (order.size() > limit) { // ponytail: oldest-first eviction, not least-recently-used; fine while chunks arrive in rough order
+                    Long old = order.poll();
+                    if (old != null) map.remove(old);
                 }
                 try {
-                    mine.complete(relaxTile(tx * RELAX_TILE, tz * RELAX_TILE));
+                    mine.complete(compute.get());
                 } catch (RuntimeException e) {
-                    relaxedTiles.remove(key);
+                    map.remove(key);
                     mine.completeExceptionally(e);
                 }
             }
@@ -622,9 +646,15 @@ public final class Terrain {
         int m = RELAX_STEPS + 1 + (simGullies ? GULLY_REACH + 4 : 0) + (spreadFlow ? 2 * GULLY_SMOOTH + GULLY_LOCAL : 0), n = RELAX_TILE + 2 * m; // gullies look GULLY_REACH upslope, plus smoothing, routing, widening and the cut
         Column[] cs = new Column[n * n];
         float[] hgt = new float[n * n], fallen = new float[n * n], strength = new float[n * n];
-        // Rows in parallel: the threads that need this tile are waiting on it, so it should finish fast.
-        java.util.stream.IntStream.range(0, n).parallel().forEach(z -> {
-            for (int x = 0; x < n; x++) cs[x + z * n] = column(x0 - m + x, z0 - m + z);
+        // Blocks in parallel: the threads that need this tile are waiting on it, so it should finish fast.
+        int bx0 = Math.floorDiv(x0 - m, BASE_BLOCK), bz0 = Math.floorDiv(z0 - m, BASE_BLOCK), nb = Math.floorDiv(x0 - m + n - 1, BASE_BLOCK) - bx0 + 1;
+        java.util.stream.IntStream.range(0, nb * nb).parallel().forEach(k -> {
+            int bx = bx0 + k % nb, bz = bz0 + k / nb;
+            Column[] b = baseBlock(bx, bz);
+            int ox = bx * BASE_BLOCK - (x0 - m), oz = bz * BASE_BLOCK - (z0 - m); // block corner in tile coordinates
+            int from = Math.max(0, -ox), to = Math.min(BASE_BLOCK, n - ox);
+            for (int z = Math.max(0, -oz); z < Math.min(BASE_BLOCK, n - oz); z++)
+                System.arraycopy(b, from + z * BASE_BLOCK, cs, ox + from + (oz + z) * n, to - from);
         });
         for (int i = 0; i < n * n; i++) {
             hgt[i] = cs[i].ground();
@@ -646,8 +676,10 @@ public final class Terrain {
         if (simGullies) hgt = gullies(hgt, fixed, cs, n, off);
         float[] limit = new float[8];
         for (int k = 0; k < 8; k++) limit[k] = RELAX_TALUS * (k < 4 ? 1 : 1.4142f);
+        float[] spare = new float[n * n]; // two height buffers in turn, not a new one each round (~13 MB of garbage a tile)
         for (int step = 0; step < RELAX_STEPS; step++) {
-            float[] next = hgt.clone();
+            float[] next = spare;
+            System.arraycopy(hgt, 0, next, 0, n * n);
             boolean moved = false;
             for (int i = n + 1; i < n * n - n - 1; i++) {
                 if (fixed[i]) continue;
@@ -666,6 +698,7 @@ public final class Terrain {
                     }
                 }
             }
+            spare = hgt;
             hgt = next;
             if (!moved) break; // settled: further rounds would change nothing, so tiles still agree exactly
         }
@@ -726,15 +759,31 @@ public final class Terrain {
             }
             for (int k = 0; k < 8 && sum > 0; k++) share[i * 8 + k] /= sum;
         }
-        float[] area = new float[n * n];
+        float[] area = new float[n * n], next = new float[n * n];
         java.util.Arrays.fill(area, 1);
+        // Where each block's water goes, listed once (block by block, neighbour by neighbour, the order the sums need):
+        // the rounds below then skip the dry directions instead of testing all eight every round.
+        int[] first = new int[n * n + 1], to = null;
+        float[] part = null;
+        if (spreadFlow) {
+            int edges = 0;
+            for (int i = 0; i < n * n * 8; i++) if (share[i] > 0) edges++;
+            to = new int[edges];
+            part = new float[edges];
+            for (int i = 0, e = 0; i < n * n; i++) {
+                first[i] = e;
+                for (int k = 0; k < 8; k++) if (share[i * 8 + k] > 0) { to[e] = i + off[k]; part[e++] = share[i * 8 + k]; }
+                first[i + 1] = e;
+            }
+        }
         for (int round = 0; round < GULLY_REACH; round++) { // each round water from one block further upslope arrives
-            float[] next = new float[n * n];
             java.util.Arrays.fill(next, 1);
             for (int i = 0; i < n * n; i++)
-                if (spreadFlow) { for (int k = 0; k < 8; k++) if (share[i * 8 + k] > 0) next[i + off[k]] += area[i] * share[i * 8 + k]; }
+                if (spreadFlow) { for (int e = first[i]; e < first[i + 1]; e++) next[to[e]] += area[i] * part[e]; }
                 else if (receiver[i] >= 0) next[receiver[i]] += area[i];
+            float[] done = area; // two buffers in turn, not a new one each round
             area = next;
+            next = done;
         }
         float[] cut = new float[n * n], out = hgt.clone();
         for (int i = 0; i < n * n; i++)
@@ -1922,6 +1971,25 @@ public final class Terrain {
     }
 
     /** Cheap version for biome lookups: no rivers, no detail noise. */
+    /**
+     * biomeAt, read from a rockfall tile or a square of plain columns already worked out where there is one: the game
+     * asks for biomes just before it builds a chunk, and building the whole column again for each was ~8% of the
+     * generator's time. Rockfall keeps biomes, so the answer is the same. Never works out a tile just for this.
+     */
+    public Biome biomeAtCached(int realX, int realZ) {
+        if (!richBiomes) return biomeAt(realX, realZ);
+        Column c = ready(relaxedTiles, realX, realZ, RELAX_TILE);
+        if (c == null) c = ready(baseBlocks, realX, realZ, BASE_BLOCK);
+        return c != null ? c.biome() : biomeAt(realX, realZ);
+    }
+
+    /** The column at (x, z) from a square of side size in the cache, or null if that square isn't finished. */
+    private static Column ready(java.util.concurrent.ConcurrentHashMap<Long, java.util.concurrent.CompletableFuture<Column[]>> map, int x, int z, int size) {
+        int kx = Math.floorDiv(x, size), kz = Math.floorDiv(z, size);
+        var f = map.get((long) kx << 32 | (kz & 0xffffffffL));
+        return f != null && f.isDone() && !f.isCompletedExceptionally() ? f.join()[(x - kx * size) + (z - kz * size) * size] : null;
+    }
+
     public Biome biomeAt(int realX, int realZ) {
         if (richBiomes) return column(realX, realZ).biome(); // rivers and shores need the whole column
         double x = realX / (double) zoom, z = realZ / (double) zoom, u = warpU(x, z), v = warpV(x, z);
