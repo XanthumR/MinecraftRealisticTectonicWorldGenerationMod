@@ -7,15 +7,11 @@ group = 'com.realtectonics'
 version = '0.1.0'
 base { archivesName = 'realtectonics' }
 
+// Client-only mods for the dev client: loaded through fabric.addMods so the dev server runs without them, as a real one would.
+configurations { clientMods { transitive = false } }
+
 repositories {
     maven { url = 'https://api.modrinth.com/maven' } // the dev client's mods
-}
-
-loom {
-    runs {
-        client { vmArgs '-Xmx8G'; runDir 'run-fabric' } // not run/: its 1.21.1 worlds would be upgraded for good, and its mods are NeoForge's
-        server { runDir 'run-server' } // its own folder: client-only mods would crash a server
-    }
 }
 
 dependencies {
@@ -23,10 +19,15 @@ dependencies {
     implementation "net.fabricmc:fabric-loader:${project.loader_version}"
     implementation "net.fabricmc.fabric-api:fabric-api:${project.fabric_api_version}"
 
-    // Dev client only, by Modrinth version id: Voxy draws far-off terrain as LODs (it needs Sodium); Biomes O' Plenty
-    // lets new worlds pick its realistic biomes (TectonicBiomeSource "biomesoplenty" pack).
-    localRuntime 'maven.modrinth:sodium:xJZxADzI'         // mc26.2-0.9.2-fabric
-    localRuntime 'maven.modrinth:voxy:LzyXnE51'           // 0.2.19-beta
+    // Dev client only, by Modrinth version id (clientMods below): Voxy draws far-off terrain as LODs (it needs Sodium).
+    // Voxy only draws generated chunks; Voxy WorldGen generates them around you in the background and hands them to it,
+    // so far ranges show up without exploring. Cloth Config is its settings library, Mod Menu the button to open them.
+    clientMods 'maven.modrinth:sodium:xJZxADzI'         // mc26.2-0.9.2-fabric
+    clientMods 'maven.modrinth:voxy:LzyXnE51'           // 0.2.19-beta
+    clientMods 'maven.modrinth:voxy-worldgen:fZooaCeC'  // 2.4.3
+    clientMods 'maven.modrinth:cloth-config:Nv3xnWXd'   // 26.2.155+fabric
+    clientMods 'maven.modrinth:modmenu:iRo7AZXf'        // 20.0.3
+    // Both sides: Biomes O' Plenty lets new worlds pick its realistic biomes (TectonicBiomeSource "biomesoplenty" pack).
     localRuntime 'maven.modrinth:biomes-o-plenty:MNZPk6V0' // 26.2.0.0.28
     localRuntime 'maven.modrinth:terrablender:KQix25Qc'
     localRuntime 'maven.modrinth:glitchcore:SDUCBYRU'
@@ -34,6 +35,17 @@ dependencies {
     testImplementation platform('org.junit:junit-bom:5.11.4')
     testImplementation 'org.junit.jupiter:junit-jupiter'
     testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+}
+
+// After dependencies: the client run lists clientMods' files.
+loom {
+    runs {
+        client {
+            vmArgs '-Xmx8G', "-Dfabric.addMods=${configurations.clientMods.files.join(File.pathSeparator)}"
+            runDir 'run-fabric' // not run/: its 1.21.1 worlds would be upgraded for good, and its mods are NeoForge's
+        }
+        server { runDir 'run-server' } // its own folder: client-only mods would crash a server
+    }
 }
 
 processResources {

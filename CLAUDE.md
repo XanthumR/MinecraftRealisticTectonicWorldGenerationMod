@@ -101,8 +101,11 @@ come from `markLakes`.
   - Send commands with `python tools/rcon.py "cmd"` (`forceload add`, `execute if block ...`). `tools/topblock.py x z` reads a column's top block.
   - Afterwards: `stop`, remove the rcon lines, and `rm -rf run-server/world`.
   - **Never kill the user's client**; only stop processes I started.
-- Dev mods (`build.gradle` `localRuntime`, by Modrinth version id): Sodium and Voxy (far terrain as LODs), Biomes O' Plenty
-  with TerraBlender and GlitchCore. Voxy only draws chunks that were generated; Chunky pregenerates them.
+- Dev mods, by Modrinth version id: client only (`clientMods`, loaded via `-Dfabric.addMods` so the dev server runs
+  without them, as a real one would; on the server Voxy WorldGen's worker crashed loading Voxy's client classes): Sodium,
+  Voxy (far terrain as LODs), Voxy WorldGen (generates chunks around the player in the background and feeds Voxy, so
+  far terrain shows without exploring; settings in `run-fabric/config/voxyworldgenv2.json` or Mod Menu), Cloth Config,
+  Mod Menu. Both sides (`localRuntime`): Biomes O' Plenty with TerraBlender and GlitchCore.
 
 ## Style
 - Ponytail: minimal code, reuse helpers in `Terrain` (`noise`/`fine`/`cubic`/`bilinear`/`smoothstep`/`hash01`/`wrapBlocks`/`cell`).

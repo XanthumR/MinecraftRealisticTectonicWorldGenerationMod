@@ -63,8 +63,9 @@ Large and Huge planets need more memory to create (Huge: give Minecraft 4-6 GB).
 
 ### Works well with
 
-- **[Voxy](https://modrinth.com/mod/voxy)** (with Sodium): see whole mountain ranges on the horizon. It draws only
-  terrain that has been generated, so pregenerate with [Chunky](https://modrinth.com/mod/chunky).
+- **[Voxy](https://modrinth.com/mod/voxy)** (with Sodium) and **[Voxy WorldGen](https://modrinth.com/mod/voxy-worldgen)**
+  (with Cloth Config): see whole mountain ranges on the horizon. Voxy only draws terrain that has been generated; Voxy
+  WorldGen generates it around you in the background.
 - **[Distant Horizons](https://modrinth.com/mod/distanthorizons)**: the alternative; it generates the far terrain itself.
 - **[Biomes O' Plenty](https://modrinth.com/mod/biomes-o-plenty)**: picked up automatically for new worlds.
 - **[C2ME](https://modrinth.com/mod/c2me-fabric)**: about twice the chunk generation speed on a server (alpha on 26.2).
@@ -75,7 +76,7 @@ Needs Java 25 (`JAVA_HOME` pointing at it).
 
 ```
 ./gradlew build          # the jar ends up in build/libs
-./gradlew runClient      # a dev client with Voxy, Sodium and Biomes O' Plenty, in run-fabric/
+./gradlew runClient      # a dev client with Voxy, Voxy WorldGen, Sodium and Biomes O' Plenty, in run-fabric/
 ./gradlew test
 ```
 
