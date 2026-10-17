@@ -70,6 +70,12 @@ come from `markLakes`.
   (terrain area time and an output hash that must not change in pure speed work). Profile with `jcmd <pid> JFR.start` or the
   `jdk.jfr.Recording` API inside jshell (the jshell JVM is killed, so -XX:StartFlightRecording never dumps).
 - Compile: `./gradlew compileJava -q`. Tests: `./gradlew test -q`. Jar: `./gradlew build -q`.
+- **`Terrain.column(double, double, boolean)` is ~7,550 bytes of bytecode; the JIT never compiles a method over 8,000**
+  (HotSpot's DontCompileHugeMethods), and the generator would then run interpreted, many times slower. Put new features in
+  their own methods; check the size with `javap -c -p` (largest offset) after adding to it.
+- Speed work must keep `relaxhash.jsh` hashes: format 46 `acba683bd8c9b0cb` (`-Dfmt=46`), the file's own format
+  `d4fc4b2912dbcb9`. `relaxprof.jsh` shows where the time goes. Measured dead ends: per-thread memos of river splines and
+  pond sites (no gain), tile work on half the cores (smooth but slow).
 - jshell: `"/c/Program Files/Java/jdk-21.0.12/bin/jshell" -R-Xmx6g [-R-Dkey=val] --class-path build/classes/java/main tools/X.jsh`
   - Most scripts build seed 777 at `PlanetSettings.DEFAULT` with `new Terrain(d, 777, 1, 1, 2)`.
   - Set `d.format = N` before building a `Terrain` to compare before and after.

@@ -12,6 +12,6 @@ for (var e : jdk.jfr.consumer.RecordingFile.readAllEvents(f)) { var st = e.getSt
   self.merge(top, 1, Integer::sum); var seen = new java.util.HashSet<String>();
   for (var x : fr) { String n = tail(x.getMethod().getType().getName()) + "." + x.getMethod().getName(); if (x.getMethod().getType().getName().contains("realtectonics") && seen.add(n)) incl.merge(n, 1, Integer::sum); } }
 final int T = total;
-System.out.println("own time (line):"); self.entrySet().stream().sorted((a, b) -> b.getValue() - a.getValue()).limit(16).forEach(x -> System.out.printf("  %5.1f%%  %s%n", 100.0 * x.getValue() / T, x.getKey()));
-System.out.println("inside (incl. callees):"); incl.entrySet().stream().sorted((a, b) -> b.getValue() - a.getValue()).limit(16).forEach(x -> System.out.printf("  %5.1f%%  %s%n", 100.0 * x.getValue() / T, x.getKey()));
+System.out.println("own time (line):"); self.entrySet().stream().sorted((a, b) -> b.getValue() - a.getValue()).limit(Integer.getInteger("top", 16)).forEach(x -> System.out.printf("  %5.1f%%  %s%n", 100.0 * x.getValue() / T, x.getKey()));
+System.out.println("inside (incl. callees):"); incl.entrySet().stream().sorted((a, b) -> b.getValue() - a.getValue()).limit(Integer.getInteger("top", 16)).forEach(x -> System.out.printf("  %5.1f%%  %s%n", 100.0 * x.getValue() / T, x.getKey()));
 /exit

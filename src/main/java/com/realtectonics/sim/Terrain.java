@@ -176,8 +176,8 @@ public final class Terrain {
     private final float landMetresPerBlock;
     private final float shallowBlocks;   // blocks the shallow sea takes; 0 on planets saved before shelves
     private final float offshoreSlope;   // how fast the sea floor drops off the smooth coastline
-    private final Map<Integer, List<Cone>> conesByCell = new HashMap<>(); // every cell a cone reaches
-    private final Map<Integer, List<Atoll>> atollsByCell = new HashMap<>();
+    private final CellMap<Cone> conesByCell = new CellMap<>(); // every cell a cone reaches
+    private final CellMap<Atoll> atollsByCell = new CellMap<>();
     private final float iceCapBelow;   // °C: older planets keep their old ice line
     private final boolean lowlandRivers;  // meanders and deltas: format 7; off on older planets, so their rivers stay put
     private final float riverWidth;
@@ -231,12 +231,12 @@ public final class Terrain {
     private final boolean[] merged;       // per cell: ice here comes from two glaciers that joined upstream, so a medial moraine runs on it (format 40)
     private final float[] rangeY, foothill, orogen; // per cell, for folds: heavily smoothed height, how far a range nearby towers over it, collision belts blurred
     private final boolean[] glacialHead, glacialEnd; // per cell: where an Ice Age glacier began, and where it ended
-    private final Map<Integer, List<Horn>> hornsByCell = new HashMap<>();
+    private final CellMap<Horn> hornsByCell = new CellMap<>();
     private final float[] cliffy, barriers; // per cell, blurred: hard high coasts that end in cliffs, soft low ones with barrier islands
     private final float[] riverLevel;    // per cell: river water level in blocks; below the ground where a dry upland's river cut a canyon
     private final int[] mainDonor;       // per cell: the upstream neighbour bringing the most water, or -1
-    private final Map<Integer, List<Delta>> deltasByCell = new HashMap<>(); // by warped cell
-    private final Map<Integer, List<Fan>> deltasByCellFans = new HashMap<>(); // alluvial fans, by warped cell
+    private final CellMap<Delta> deltasByCell = new CellMap<>(); // by warped cell
+    private final CellMap<Fan> deltasByCellFans = new CellMap<>(); // alluvial fans, by warped cell
 
     /** An alluvial fan at a mountain front: apex where the valley opens, spreading toward the stream's next cell. */
     private record Fan(double u, double v, double dirU, double dirV, float radius, float apex) {}
@@ -464,7 +464,7 @@ public final class Terrain {
             int reach = (int) Math.ceil((landforms ? cone.radius * cone.lobes : cone.reach()) / BLOCKS_PER_CELL) + 1, cu = Math.round(v.u()), cv = Math.round(v.v());
             for (int dy = -reach; dy <= reach; dy++)
                 for (int dx = -reach; dx <= reach; dx++)
-                    conesByCell.computeIfAbsent(cell(cu + dx, cv + dy), k -> new ArrayList<>()).add(cone);
+                    conesByCell.add(cell(cu + dx, cv + dy), cone);
         }
         for (Volcano v : landforms ? data.volcanoes : List.<Volcano>of()) {
             float summit = v.surfaceMetres(0);
@@ -472,7 +472,7 @@ public final class Terrain {
             Atoll a = new Atoll(wrapBlocks((v.u() - originX) * BLOCKS_PER_CELL), (v.v() - originY) * BLOCKS_PER_CELL, ATOLL_SHARE * v.radiusBlocks());
             int reach = (int) Math.ceil((a.radius * 1.3 + REEF_HALF + REEF_FRONT) / BLOCKS_PER_CELL) + 1, cu = Math.round(v.u()), cv = Math.round(v.v());
             for (int dy = -reach; dy <= reach; dy++)
-                for (int dx = -reach; dx <= reach; dx++) atollsByCell.computeIfAbsent(cell(cu + dx, cv + dy), k -> new ArrayList<>()).add(a);
+                for (int dx = -reach; dx <= reach; dx++) atollsByCell.add(cell(cu + dx, cv + dy), a);
         }
         for (int c = 0; landforms && c < w * h; c++) {
             int r = data.receiver[c], up = mainDonor[c];
@@ -481,7 +481,7 @@ public final class Terrain {
             double du = wrap(r % w - c % w), dv = r / w - c / w, len = hyp(du, dv);
             Fan fan = new Fan(c % w, c / w, du / len, dv / len, FAN_RADIUS * zoom, groundY[c] + 2);
             for (int dy = -3; dy <= 3; dy++)
-                for (int dx = -3; dx <= 3; dx++) deltasByCellFans.computeIfAbsent(cell(c % w + dx, c / w + dy), k -> new ArrayList<>()).add(fan);
+                for (int dx = -3; dx <= 3; dx++) deltasByCellFans.add(cell(c % w + dx, c / w + dy), fan);
         }
         for (int c = 0; lowlandRivers && c < w * h; c++) {
             int r = data.receiver[c];
@@ -493,7 +493,7 @@ public final class Terrain {
             int reach = (int) Math.ceil(radius / blocksPerCell) + 2;
             for (int dy = -reach; dy <= reach; dy++)
                 for (int dx = -reach; dx <= reach; dx++)
-                    deltasByCell.computeIfAbsent(cell(c % w + dx, c / w + dy), k -> new ArrayList<>()).add(delta);
+                    deltasByCell.add(cell(c % w + dx, c / w + dy), delta);
         }
     }
 
@@ -501,7 +501,7 @@ public final class Terrain {
     private DeltaSpot deltaAt(double x, double z, double u, double v) {
         DeltaSpot best = null;
         float bestBeyond = Float.MAX_VALUE;
-        for (Delta d : deltasByCell.getOrDefault(cell((int) Math.round(u), (int) Math.round(v)), List.of())) {
+        for (Delta d : deltasByCell.get(cell((int) Math.round(u), (int) Math.round(v)))) {
             double pu = wrapCells(u - d.u) * blocksPerCell, pv = (v - d.v) * blocksPerCell;
             double along = pu * d.dirU + pv * d.dirV, across = pu * d.dirV - pv * d.dirU, r = hyp(pu, pv);
             double wander = organic ? 0.35 * (noise(x, z, 64, 14) + 0.5 * noise(x, z, 32, 20)) : 0.12 * noise(x, z, 64, 14);
@@ -531,13 +531,13 @@ public final class Terrain {
     private record Atoll(double x, double z, float radius) {}
 
     private List<Atoll> atollsNear(double x, double z) {
-        return atollsByCell.getOrDefault(cell((int) Math.floor(originX + 0.5 + x / (double) BLOCKS_PER_CELL),
-                (int) Math.floor(originY + 0.5 + z / (double) BLOCKS_PER_CELL)), List.of());
+        return atollsByCell.get(cell((int) Math.floor(originX + 0.5 + x / (double) BLOCKS_PER_CELL),
+                (int) Math.floor(originY + 0.5 + z / (double) BLOCKS_PER_CELL)));
     }
 
     private List<Cone> conesNear(double x, double z) {
-        return conesByCell.getOrDefault(cell((int) Math.floor(originX + 0.5 + x / (double) BLOCKS_PER_CELL),
-                (int) Math.floor(originY + 0.5 + z / (double) BLOCKS_PER_CELL)), List.of());
+        return conesByCell.get(cell((int) Math.floor(originX + 0.5 + x / (double) BLOCKS_PER_CELL),
+                (int) Math.floor(originY + 0.5 + z / (double) BLOCKS_PER_CELL)));
     }
 
     /** Height in blocks above sea level at the default mountain scale; fixes the size of things in the planet's cells. */
@@ -609,6 +609,24 @@ public final class Terrain {
         return out;
     }
 
+    /**
+     * Lists of things by cell (cones, atolls, horns, deltas, fans), with a bit per cell saying whether there are any:
+     * most cells have none, and every column asked, boxing its cell number into a hash map lookup each time.
+     */
+    private static final class CellMap<T> {
+        private final Map<Integer, List<T>> lists = new HashMap<>();
+        private final java.util.BitSet any = new java.util.BitSet();
+
+        void add(int cell, T thing) {
+            lists.computeIfAbsent(cell, k -> new ArrayList<>()).add(thing);
+            any.set(cell);
+        }
+
+        List<T> get(int cell) {
+            return any.get(cell) ? lists.get(cell) : List.of();
+        }
+    }
+
     /** A relaxed tile, computed once: threads asking for one being computed wait for it instead of repeating it. */
     private Column[] tile(int tx, int tz) {
         return cached(relaxedTiles, tileOrder, RELAX_CACHE, tx, tz, () -> relaxTile(tx * RELAX_TILE, tz * RELAX_TILE));
@@ -622,8 +640,15 @@ public final class Terrain {
     private Column[] baseBlock(int bx, int bz) {
         return cached(baseBlocks, baseOrder, BASE_CACHE, bx, bz, () -> {
             Column[] b = new Column[BASE_BLOCK * BASE_BLOCK];
-            for (int z = 0; z < BASE_BLOCK; z++)
-                for (int x = 0; x < BASE_BLOCK; x++) b[x + z * BASE_BLOCK] = column(bx * BASE_BLOCK + x, bz * BASE_BLOCK + z);
+            int r = (int) SCREE_REACH, size = BASE_BLOCK + 2 * r;
+            SurfaceGrid previous = SURFACES.get();
+            SURFACES.set(new SurfaceGrid(this, bx * BASE_BLOCK - r, bz * BASE_BLOCK - r, size, new float[4 * size * size], new boolean[size * size]));
+            try {
+                for (int z = 0; z < BASE_BLOCK; z++)
+                    for (int x = 0; x < BASE_BLOCK; x++) b[x + z * BASE_BLOCK] = column(bx * BASE_BLOCK + x, bz * BASE_BLOCK + z);
+            } finally {
+                SURFACES.set(previous);
+            }
             return b;
         });
     }
@@ -870,6 +895,40 @@ public final class Terrain {
         return column(x / (double) zoom, z / (double) zoom);
     }
 
+    /**
+     * Surfaces already worked out in the square of columns this thread is building, its margin included: the scree check
+     * reads the surface SCREE_REACH blocks either side, which is another column's own, so each was worked out up to five
+     * times. Kept per square and thread; a surface depends only on its position, so the answer is the same.
+     */
+    private record SurfaceGrid(Terrain owner, int x0, int z0, int size, float[] values, boolean[] known) {}
+
+    private static final ThreadLocal<SurfaceGrid> SURFACES = new ThreadLocal<>();
+
+    /** surface(), from this thread's square when it holds that real block; u and v NaN: work out the warp if needed. */
+    private float surfaceAt(double x, double z, double u, double v, float[] keep) {
+        SurfaceGrid g = SURFACES.get();
+        double rx = x * zoom, rz = z * zoom;
+        int gx = (int) Math.floor(rx) - (g == null ? 0 : g.x0), gz = (int) Math.floor(rz) - (g == null ? 0 : g.z0);
+        boolean inGrid = g != null && g.owner == this && rx == Math.floor(rx) && rz == Math.floor(rz) && gx >= 0 && gz >= 0 && gx < g.size && gz < g.size;
+        if (inGrid && g.known[gx + gz * g.size]) {
+            int i = 4 * (gx + gz * g.size);
+            keep[0] = g.values[i + 1];
+            keep[1] = g.values[i + 2];
+            keep[2] = g.values[i + 3];
+            return g.values[i];
+        }
+        float natural = surface(x, z, Double.isNaN(u) ? warpU(x, z) : u, Double.isNaN(v) ? warpV(x, z) : v, keep);
+        if (inGrid) {
+            int i = 4 * (gx + gz * g.size);
+            g.values[i] = natural;
+            g.values[i + 1] = keep[0];
+            g.values[i + 2] = keep[1];
+            g.values[i + 3] = keep[2];
+            g.known[gx + gz * g.size] = true;
+        }
+        return natural;
+    }
+
     /** The land's own surface at unzoomed (x, z), before rivers, glaciers and cones cut or build on it. keep: smooth height, shore, roughness. */
     private float surface(double x, double z, double u, double v, float[] keep) {
         float natural = cubic(groundY, u, v);
@@ -949,7 +1008,7 @@ public final class Terrain {
     private Column column(double x, double z, boolean ponds) {
         double u = warpU(x, z), v = warpV(x, z);
         float[] keep = new float[3];
-        float natural = surface(x, z, u, v, keep), smooth = keep[0], shore = keep[1], rough = keep[2];
+        float natural = surfaceAt(x, z, u, v, keep), smooth = keep[0], shore = keep[1], rough = keep[2];
         // Scree: rock falling off a wall piles up at its foot. A few blocks away the ground stands far higher, while
         // on the other side it is gentle: a rubble apron, ragged at its edges.
         boolean scree = false;
@@ -958,9 +1017,9 @@ public final class Terrain {
         if (folds && natural > SEA_Y + SCREE_ABOVE && fine(x, z, 16, 72) > screePatch) {
             double r = SCREE_REACH / (double) zoom;
             float up = 0, down = 0;
-            for (int k = 0; k < 4; k++) { // ponytail: four full surface samples, ~+20% column cost on high ground; cache per chunk if it matters
+            for (int k = 0; k < 4; k++) { // four surfaces, mostly read from this square's (surfaceAt)
                 double sx = x + (k == 0 ? r : k == 1 ? -r : 0), sz = z + (k == 2 ? r : k == 3 ? -r : 0);
-                float d = surface(sx, sz, warpU(sx, sz), warpV(sx, sz), keep) - natural;
+                float d = surfaceAt(sx, sz, Double.NaN, Double.NaN, keep) - natural;
                 up = Math.max(up, d);
                 down = Math.max(down, -d);
             }
@@ -1043,7 +1102,7 @@ public final class Terrain {
             if (canyon) bank = 12 + 2 * river.half + 1.5f * river.incision; // wide, stepping down in benches
         }
         // Alluvial fans: where a stream leaves its mountain valley for the dry plain it drops its gravel in a cone.
-        if (landforms) for (Fan fan : deltasByCellFans.getOrDefault(cell(iu, iv), List.of())) {
+        if (landforms) for (Fan fan : deltasByCellFans.get(cell(iu, iv))) {
             double pu = wrapCells(u - fan.u) * blocksPerCell, pv = (v - fan.v) * blocksPerCell, d = hyp(pu, pv);
             double angle = Math.abs(Math.atan2(pu * fan.dirV - pv * fan.dirU, pu * fan.dirU + pv * fan.dirV));
             if (d >= fan.radius || angle > FAN_SPREAD) continue;
@@ -1295,8 +1354,8 @@ public final class Terrain {
                 }
         }
         // Horns: four flat faces meeting in a point, cut back by the cirques around the summit.
-        if (landforms && !(calderas && crater)) for (Horn horn : hornsByCell.getOrDefault(cell((int) Math.floor(originX + 0.5 + x / (double) BLOCKS_PER_CELL),
-                (int) Math.floor(originY + 0.5 + z / (double) BLOCKS_PER_CELL)), List.of())) {
+        if (landforms && !(calderas && crater)) for (Horn horn : hornsByCell.get(cell((int) Math.floor(originX + 0.5 + x / (double) BLOCKS_PER_CELL),
+                (int) Math.floor(originY + 0.5 + z / (double) BLOCKS_PER_CELL)))) {
             double dx = wrapBlocks(x - horn.x), dz = z - horn.z, ca = Math.cos(horn.angle), sa = Math.sin(horn.angle);
             double face = Math.max(Math.abs(dx * ca + dz * sa), Math.abs(dz * ca - dx * sa)) / HORN_RADIUS;
             if (face < 1) {
@@ -1404,7 +1463,7 @@ public final class Terrain {
             if (!top) continue;
             Horn horn = new Horn(wrapBlocks((c % w - originX) * BLOCKS_PER_CELL), (c / w - originY) * BLOCKS_PER_CELL, hash01(c) * Math.PI / 2, HORN_HEIGHT);
             for (int dy = -2; dy <= 2; dy++)
-                for (int dx = -2; dx <= 2; dx++) hornsByCell.computeIfAbsent(cell(c % w + dx, c / w + dy), k -> new ArrayList<>()).add(horn);
+                for (int dx = -2; dx <= 2; dx++) hornsByCell.add(cell(c % w + dx, c / w + dy), horn);
         }
     }
 
