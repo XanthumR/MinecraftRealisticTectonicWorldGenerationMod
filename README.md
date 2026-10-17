@@ -61,9 +61,10 @@ to see the whole planet (**G** switches to its rocks); right-click a spot on the
 
 Large and Huge planets need more memory to create (Huge: give Minecraft 4-6 GB).
 
-**Smooth play:** add `-XX:+UseZGC` to Minecraft's Java arguments (in your launcher's installation settings). Chunks
+**Smooth play:** add `-XX:+UseZGC -XX:ConcGCThreads=3` to Minecraft's Java arguments (in your launcher's installation settings). Chunks
 generate all the time while you play (more so with Voxy WorldGen or Distant Horizons), and Java's default garbage collector
-then pauses the game for up to ~35 ms at a time: microstutters. ZGC keeps its pauses under a millisecond.
+then pauses the game for up to ~35 ms at a time: microstutters. ZGC keeps its pauses under a millisecond. With Voxy WorldGen, keep its parallel tasks low (2-3 in Mod Menu): each generated chunk is also lit,
+saved and dropped again, and at 6 tasks the garbage outran the collector and froze the game for up to 65 ms.
 
 ### Works well with
 

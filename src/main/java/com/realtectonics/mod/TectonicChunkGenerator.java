@@ -242,8 +242,10 @@ public final class TectonicChunkGenerator extends ChunkGenerator {
         Beardifier beard = Beardifier.forStructuresInChunk(structures, chunk.getPos());
         int x0 = chunk.getPos().getMinBlockX(), z0 = chunk.getPos().getMinBlockZ();
         Terrain.Column[] cols = new Terrain.Column[18 * 18], relaxed = terrain.relaxedColumns(x0 - 1, z0 - 1, 18, 18);
+        if (beard == Beardifier.EMPTY) return relaxed; // no structure here, as in most chunks: the ground stands as it is
+        Probe probe = new Probe();
         for (int dz = -1; dz <= 16; dz++)
-            for (int dx = -1; dx <= 16; dx++) cols[dx + 1 + (dz + 1) * 18] = beardify(relaxed[dx + 1 + (dz + 1) * 18], beard, x0 + dx, z0 + dz);
+            for (int dx = -1; dx <= 16; dx++) cols[dx + 1 + (dz + 1) * 18] = beardify(relaxed[dx + 1 + (dz + 1) * 18], beard, x0 + dx, z0 + dz, probe);
         return cols;
     }
 
@@ -254,10 +256,12 @@ public final class TectonicChunkGenerator extends ChunkGenerator {
      * Foundations under structures and clearance above them. The column's ground becomes a density, solid below
      * and air above, and the beardifier adds to it near each piece; the new ground is the top solid block.
      */
-    private static Terrain.Column beardify(Terrain.Column c, Beardifier beard, int x, int z) {
+    private static Terrain.Column beardify(Terrain.Column c, Beardifier beard, int x, int z, Probe probe) {
         int top = c.ground() - BEARD_REACH;
+        probe.x = x;
+        probe.z = z;
         for (int y = c.ground() + BEARD_REACH; y > top; y--)
-            if ((c.ground() + 0.5 - y) / BEARD_SLOPE + beard.compute(new DensityFunction.SinglePointContext(x, y, z)) > 0) {
+            if ((c.ground() + 0.5 - y) / BEARD_SLOPE + beard.compute(probe.at(y)) > 0) {
                 top = y;
                 break;
             }
@@ -265,6 +269,23 @@ public final class TectonicChunkGenerator extends ChunkGenerator {
         int none = Terrain.Column.NO_WATER;
         return new Terrain.Column(top, c.water() > top ? c.water() : none, c.lava() > top ? c.lava() : none, c.ice() > top ? c.ice() : none,
                 c.biome(), c.fold(), c.volcanic(), c.rock(), c.cover());
+    }
+
+    /**
+     * One reusable point for the beardifier: a new one per block tested was a few percent of all the garbage while
+     * chunks generate nonstop, and garbage is what stalls the game (ZGC allocation stalls).
+     */
+    private static final class Probe implements DensityFunction.FunctionContext {
+        int x, y, z;
+
+        Probe at(int y) {
+            this.y = y;
+            return this;
+        }
+
+        @Override public int blockX() { return x; }
+        @Override public int blockY() { return y; }
+        @Override public int blockZ() { return z; }
     }
 
     private static int landTop(Terrain.Column c) {
