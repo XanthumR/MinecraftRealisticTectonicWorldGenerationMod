@@ -6,3 +6,4 @@ run-server/
 *.log
 .idea/
 *.iml
+run-fabric/
