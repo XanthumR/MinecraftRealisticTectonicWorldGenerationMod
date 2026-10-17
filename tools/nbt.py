@@ -18,10 +18,17 @@ def rd(f, t):
             name = rd(f, 8); d[name] = rd(f, tt)
     if t == 11: n = rd(f, 3); return [rd(f, 3) for _ in range(n)]
     if t == 12: n = rd(f, 3); return [rd(f, 4) for _ in range(n)]
-f = gzip.open(sys.argv[1]); t = rd(f, 1); rd(f, 8); root = rd(f, 10)
-wg = root['Data']['WorldGenSettings']
-print('seed', wg['seed']); print('planet', wg['dimensions']['minecraft:overworld']['generator'].get('planet'))
 import glob, os
-for p in glob.glob(os.path.join(os.path.dirname(sys.argv[1]), 'playerdata', '*.dat')): # the player's last saved spot
-    pf = gzip.open(p); rd(pf, 1); rd(pf, 8); pl = rd(pf, 10)
+def load(path):
+    f = gzip.open(path); t = rd(f, 1); rd(f, 8); return rd(f, t)
+root, here = load(sys.argv[1]), os.path.dirname(sys.argv[1])
+wg = root['Data'].get('WorldGenSettings')
+if wg is None: # Minecraft 26.x keeps it in its own file
+    wg = load(os.path.join(here, 'data', 'minecraft', 'world_gen_settings.dat'))
+    wg = wg.get('data', wg)
+print('seed', wg.get('seed'), '| keys', sorted(wg)[:8])
+dims = wg.get('dimensions', {})
+print('planet', dims.get('minecraft:overworld', {}).get('generator', {}).get('planet'))
+for p in glob.glob(os.path.join(here, 'playerdata', '*.dat')) + glob.glob(os.path.join(here, 'players', 'data', '*.dat')): # the player's last saved spot
+    pl = load(p)
     print('player', pl.get('Pos'), 'yaw/pitch', pl.get('Rotation'))
