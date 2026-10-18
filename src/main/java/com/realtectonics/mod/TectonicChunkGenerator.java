@@ -68,11 +68,12 @@ public final class TectonicChunkGenerator extends ChunkGenerator {
 
     private static final BlockState AIR = Blocks.AIR.defaultBlockState(), STONE = Blocks.STONE.defaultBlockState(),
             DEEPSLATE = Blocks.DEEPSLATE.defaultBlockState(), BEDROCK = Blocks.BEDROCK.defaultBlockState(),
-            WATER = Blocks.WATER.defaultBlockState(), ICE = Blocks.ICE.defaultBlockState(), SNOW = Blocks.SNOW.defaultBlockState(),
+            WATER = Blocks.WATER.defaultBlockState(), ICE = Blocks.ICE.defaultBlockState(), SNOW = Blocks.SNOW.defaultBlockState(), SNOW_BLOCK = Blocks.SNOW_BLOCK.defaultBlockState(),
             LAVA = Blocks.LAVA.defaultBlockState(), MAGMA = Blocks.MAGMA_BLOCK.defaultBlockState(),
             PACKED_ICE = Blocks.PACKED_ICE.defaultBlockState(), BLUE_ICE = Blocks.BLUE_ICE.defaultBlockState(),
             MORAINE = Blocks.COBBLED_DEEPSLATE.defaultBlockState(); // rock debris riding on glacier ice (format 40)
     static final int BLUE_ICE_DEPTH = 6; // glacier ice this far down is squeezed clear of air bubbles
+    static final int FIRN_DEPTH = 2;     // blocks of snow and firn over glacier ice above the snow line, where it gains each winter's snow (format 57)
 
     /** A null top or filler means bare rock: the column's rock layers show through. */
     private record Surface(BlockState top, BlockState filler, boolean snowLayer) {}
@@ -202,6 +203,7 @@ public final class TectonicChunkGenerator extends ChunkGenerator {
                     s = ROCK; // steep faces, ridges and wind-scoured patches stand bare above the snow
                 Terrain terrain = RealTectonics.terrain();
                 boolean frozen = frozen(terrain, c, x0 + lx, z0 + lz);
+                boolean firn = glacier && terrain.firn && c.cover() != Terrain.Cover.BARE_ICE && c.cover() != Terrain.Cover.MORAINE;
                 // Snow lies wherever the planet's climate is below freezing, except on bare rock and warm ground.
                 boolean snowLayer = terrain.snowLine
                         ? !wet && !hot && !glacier && s.top != null && !warmGround(s) && terrain.snowTemperature(x0 + lx, z0 + lz, c.ground()) < 0
@@ -221,6 +223,7 @@ public final class TectonicChunkGenerator extends ChunkGenerator {
                             : wet ? (frozen && y == c.water() ? ICE : WATER)
                             : hot ? LAVA
                             : glacier ? (y == c.ice() && c.cover() == Terrain.Cover.MORAINE ? MORAINE
+                                    : firn && c.ice() - y < FIRN_DEPTH ? SNOW_BLOCK // above the snow line (no bare ice, no rubble): last winters' snow
                                     : c.ice() - y >= BLUE_ICE_DEPTH || y == c.ice() && c.cover() == Terrain.Cover.BARE_ICE ? BLUE_ICE : PACKED_ICE)
                             : SNOW;
                     int index = (y >> 4) - minSection; // chunk.getSectionIndex, without asking the chunk for its floor every block

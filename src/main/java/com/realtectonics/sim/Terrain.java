@@ -74,6 +74,8 @@ public final class Terrain {
     static final int SPRING_TILT = 3;     // blocks the ground round a hot spring may rise above its pool
     static final float CRATER_OWN = 4;    // blocks above its volcano's own cone the ground may stand and still be cut by its crater
     static final float ICE_EDGE = 12;     // blocks below the land the ice surface sinks at cells without ice, so glaciers thin to their edges
+    static final float ICE_DRAPE = 12;    // blocks of ice at most over the rock, ~180 m at Mountains 1.0 (format 55; from 56 over the rock blurred ICE_BLUR wide)
+    static final int ICE_BLUR = 8;        // blocks: half-width of each of the two box means the rock is blurred by under glacier ice (format 56)
     static final float ICE_SUMMER_MAX = 15; // °C: summers this warm melt any glacier tongue that reaches them
     static final float LAKE_SILL = 0.25f;   // cells: width of the rock sill between two lakes at different levels
     /**
@@ -227,6 +229,9 @@ public final class Terrain {
     private final boolean deepBraids;     // a braided river keeps the plain river's channel down its middle, on land and past the coast: format 52
     public final boolean plainGround;     // where gravel was on land, the biome's own ground, not coarse dirt (the user: remove the patches): format 53
     public final boolean stillSteps;      // a river's one-block steps are not set flowing at load, only falls of two or more: format 54
+    private final boolean drapedIce;      // glacier ice at most ICE_DRAPE thick, so it lies on the mountain instead of doming over it: format 55
+    private final boolean blurredIce;     // that limit over the blurred rock (relaxTile), so the ice smooths over rock steps instead of copying them as walls: format 56
+    public final boolean firn;            // above the snow line glacier ice lies under snow and firn (TectonicChunkGenerator.FIRN_DEPTH): format 57
     public final boolean fastMath;        // distances by a plain square root instead of Math.hypot (same to the last bit or two); caves sealed from water only near it: format 43
     private final boolean smoothCones;    // collapse scars of even width, crater floors meet their own rim, peaks fade over lakes, lakes one biome: format 42
     private final int coneStyle;          // Volcano.ROUND, VARIED or SMOOTH_SCARS by format
@@ -336,6 +341,9 @@ public final class Terrain {
         deepBraids = data.format >= 52;
         plainGround = data.format >= 53;
         stillSteps = data.format >= 54;
+        drapedIce = data.format >= 55;
+        blurredIce = data.format >= 56;
+        firn = data.format >= 57;
         widthMask = (data.w & (data.w - 1)) == 0 ? data.w - 1 : -1;
         coneStyle = smoothCones ? Volcano.SMOOTH_SCARS : variedVolcanoes ? Volcano.VARIED : Volcano.ROUND;
         snowLine = data.format >= 18;
@@ -759,15 +767,24 @@ public final class Terrain {
             hgt = next;
             if (!moved) break; // settled: further rounds would change nothing, so tiles still agree exactly
         }
+        // From format 56 glacier ice stands at most ICE_DRAPE over the rock blurred ~2 ICE_BLUR wide: over the rock itself
+        // (format 55) a step in the rock under the ice, which rockfall never wears down there, came through as a wall of ice.
+        float[] bed = null;
+        for (int i = 0; blurredIce && bed == null && i < n * n; i++)
+            if (cs[i].ice() != Column.NO_WATER) {
+                bed = new float[n * n];
+                for (int k = 0; k < n * n; k++) bed[k] = cs[k].ground();
+                bed = boxMean(boxMean(bed, n, ICE_BLUR), n, ICE_BLUR);
+            }
         Column[] tile = new Column[RELAX_TILE * RELAX_TILE];
         for (int z = 0; z < RELAX_TILE; z++)
             for (int x = 0; x < RELAX_TILE; x++) {
                 int i = x + m + (z + m) * n;
                 Column c = cs[i];
-                int ground = Math.round(hgt[i]);
+                int ground = Math.round(hgt[i]), ice = bed == null || c.ice() == Column.NO_WATER ? c.ice() : Math.min(c.ice(), Math.round(bed[i] + ICE_DRAPE));
                 Cover cover = c.cover() == Cover.NONE && fallen[i] > SCREE_FALLEN ? Cover.SCREE : c.cover();
-                tile[x + z * RELAX_TILE] = ground == c.ground() && cover == c.cover() ? c
-                        : new Column(ground, c.water(), c.lava(), c.ice() > ground ? c.ice() : Column.NO_WATER, c.biome(), c.fold(), c.volcanic(), c.rock(), cover);
+                tile[x + z * RELAX_TILE] = ground == c.ground() && cover == c.cover() && ice == c.ice() ? c
+                        : new Column(ground, c.water(), c.lava(), ice > ground ? ice : Column.NO_WATER, c.biome(), c.fold(), c.volcanic(), c.rock(), cover);
             }
         return tile;
     }
@@ -1410,6 +1427,9 @@ public final class Terrain {
         // glaciers meet and slopes down to its edges, leaving ridges bare; at a lake or the sea it ends in a low cliff.
         if (iceSheets) {
             float top = cubic(iceTop, u, v);
+            // From format 55 at most ICE_DRAPE thick: a cell's ice was one level sheet at the planet's height, and the block
+            // relief cuts the rock ~30 blocks below that, so the ice stood up over it as a dome. Now it lies on the mountain.
+            if (drapedIce && !blurredIce) top = Math.min(top, ground + ICE_DRAPE); // from 56 in relaxTile, over the blurred rock
             // A cell is coarse: its mean may be cold while its valley floors lie far lower and warmer. Ice thins out and
             // ends where the summer down here is too warm for it, as real snouts end at 11-15 °C summers.
             if (top > ground + 1) {
