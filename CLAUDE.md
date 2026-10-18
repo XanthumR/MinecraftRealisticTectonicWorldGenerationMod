@@ -60,7 +60,7 @@ come from `markLakes`.
 - Every change to how terrain looks goes behind a **format flag**:
   - Bump `PlanetData.FORMAT`, add a line to its comment, and add a `private final boolean x; // ...: format N` field in `Terrain`.
   - Set it as `x = data.format >= N` and gate the new code on it. Old worlds keep their look and get no chunk seams.
-  - Current format: **58**. `docs/FORMATS.md` says what each format added and why (most fix a bug the user saw);
+  - Current format: **59**. `docs/FORMATS.md` says what each format added and why (most fix a bug the user saw);
     read its "recurring causes" before fixing an unnatural spot: stamps, on/off thresholds, unstable updates, tile seams.
 - Noise and grid spacings must be **powers of two** (the planet wraps; the seam test fails otherwise).
 - Water must never spill onto lower dry ground. Waterfalls dropping into lower water are fine. Every new water or terrain feature gets a spill check.
@@ -102,7 +102,8 @@ come from `markLakes`.
 - Dev server, for in-game checks:
   - It runs in `run-server/` (client-only mods would crash a server). The dev client runs in `run-fabric/`, not `run/`:
     `run/` holds the NeoForge version's 1.21.1 worlds, which 26.2 would upgrade for good, and NeoForge mod jars.
-  - Append `enable-rcon=true`, `rcon.password=dev` and `rcon.port=25575` to `run-server/server.properties`.
+  - Append `enable-rcon=true`, `rcon.password=dev`, `rcon.port=25575` and `pause-when-empty-seconds=0` to `run-server/server.properties`
+    (26.x pauses an empty server after 60 s, and forceloaded chunks then never generate: `genspeed.py` hangs). The server rewrites the file sorted.
   - Start it with `./gradlew runServer > run/gradle-server.log 2>&1 &` and wait for `Done (`.
   - Send commands with `python tools/rcon.py "cmd"` (`forceload add`, `execute if block ...`). `tools/topblock.py x z` reads a column's top block.
   - Afterwards: `stop`, remove the rcon lines, and `rm -rf run-server/world`.
