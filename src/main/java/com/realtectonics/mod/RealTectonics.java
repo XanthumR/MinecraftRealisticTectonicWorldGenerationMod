@@ -46,6 +46,7 @@ public final class RealTectonics {
 
     // ponytail: one planet per running server; fine for single-player and dedicated servers
     private static volatile Terrain terrain;
+    private static volatile MinecraftServer server; // for the registries the cave field is built from
 
     /** A planet the world-creation preview already simulated; the new world takes it instead of simulating again. */
     private record Preview(long seed, PlanetSettings settings, PlanetData data) {}
@@ -66,6 +67,10 @@ public final class RealTectonics {
     }
 
     /** The running planet, or null when no Tectonic Planet world is loaded in this game. */
+    static net.minecraft.core.RegistryAccess registries() {
+        return server.registryAccess();
+    }
+
     public static Terrain terrainOrNull() {
         return terrain;
     }
@@ -79,6 +84,7 @@ public final class RealTectonics {
     /** Runs before the levels load: simulate the planet once per world, then reuse the saved result. */
     private static void onServerAboutToStart(ServerAboutToStartEvent event) {
         MinecraftServer server = event.getServer();
+        RealTectonics.server = server;
         LevelStem overworld = server.registryAccess().registryOrThrow(Registries.LEVEL_STEM).get(LevelStem.OVERWORLD);
         if (overworld == null || !(overworld.generator() instanceof TectonicChunkGenerator generator)) {
             terrain = null;

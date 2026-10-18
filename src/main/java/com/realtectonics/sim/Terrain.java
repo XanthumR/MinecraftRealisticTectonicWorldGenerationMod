@@ -234,6 +234,7 @@ public final class Terrain {
     private final boolean blurredIce;     // that limit over the blurred rock (relaxTile), so the ice smooths over rock steps instead of copying them as walls: format 56
     public final boolean firn;            // above the snow line glacier ice lies under snow and firn (TectonicChunkGenerator.FIRN_DEPTH): format 57
     private final boolean magmaVents;     // patches of magma on active volcanoes, thickest round the crater (magmaPatch): format 58
+    public final boolean noiseCaves;      // vanilla's noise caves under the terrain (mod.Caves): format 59
     public final boolean fastMath;        // distances by a plain square root instead of Math.hypot (same to the last bit or two); caves sealed from water only near it: format 43
     private final boolean smoothCones;    // collapse scars of even width, crater floors meet their own rim, peaks fade over lakes, lakes one biome: format 42
     private final int coneStyle;          // Volcano.ROUND, VARIED or SMOOTH_SCARS by format
@@ -347,6 +348,7 @@ public final class Terrain {
         blurredIce = data.format >= 56;
         firn = data.format >= 57;
         magmaVents = data.format >= 58;
+        noiseCaves = data.format >= 59;
         widthMask = (data.w & (data.w - 1)) == 0 ? data.w - 1 : -1;
         coneStyle = smoothCones ? Volcano.SMOOTH_SCARS : variedVolcanoes ? Volcano.VARIED : Volcano.ROUND;
         snowLine = data.format >= 18;

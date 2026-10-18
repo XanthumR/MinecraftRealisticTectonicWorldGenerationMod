@@ -135,6 +135,8 @@ public final class TectonicChunkGenerator extends NoiseBasedChunkGenerator {
             MAGMA_PATCH = new Surface(Blocks.MAGMA_BLOCK.defaultBlockState(), null, false); // hot rock breaking through an active volcano's ground (format 58)
 
     private final PlanetSettings planet;
+    private volatile Caves caves;           // noise caves for the world's RandomState below (format 59)
+    private volatile RandomState cavesFor;
 
     public TectonicChunkGenerator(BiomeSource biomes, Holder<NoiseGeneratorSettings> settings, PlanetSettings planet) {
         super(biomes, settings);
@@ -177,6 +179,12 @@ public final class TectonicChunkGenerator extends NoiseBasedChunkGenerator {
 
         Heightmap oceanFloor = chunk.getOrCreateHeightmapUnprimed(Heightmap.Types.OCEAN_FLOOR_WG);
         Heightmap worldSurface = chunk.getOrCreateHeightmapUnprimed(Heightmap.Types.WORLD_SURFACE_WG);
+        Caves.Field caveField = null;
+        if (RealTectonics.terrain().noiseCaves) {
+            int highest = minY;
+            for (Terrain.Column c : cols) highest = Math.max(highest, c.ground());
+            caveField = caves(random).new Field(x0, z0, minY, highest);
+        }
         for (int lz = 0; lz < 16; lz++)
             for (int lx = 0; lx < 16; lx++) {
                 int i = lx + 1 + (lz + 1) * 18;
@@ -211,6 +219,12 @@ public final class TectonicChunkGenerator extends NoiseBasedChunkGenerator {
                 // Snow, ice or a structure's foundation can lift the top past the build limit: never write above it.
                 int top = Math.min(wet ? c.water() : hot ? c.lava() : glacier ? c.ice() : c.ground() + (snowLayer ? 1 : 0), chunk.getMaxBuildHeight() - 1);
 
+                // Caves keep a roof under water, lava and ice, here or beside; elsewhere entrances may open at the surface.
+                boolean held = wet || hot || glacier;
+                for (int n : new int[]{i - 1, i + 1, i - 18, i + 18})
+                    held |= cols[n].water() >= cols[n].ground() || cols[n].lava() != Terrain.Column.NO_WATER || cols[n].ice() != Terrain.Column.NO_WATER;
+                int caveTop = caveField == null ? Integer.MIN_VALUE : c.ground() - (held ? Caves.ROOF : 0), solidTop = minY;
+                BlockState solidState = BEDROCK;
                 LevelChunkSection section = null;
                 int sectionIndex = -1;
                 for (int y = minY; y <= top; y++) {
@@ -224,6 +238,11 @@ public final class TectonicChunkGenerator extends NoiseBasedChunkGenerator {
                                     : firn && c.ice() - y < FIRN_DEPTH ? SNOW_BLOCK // above the snow line (no bare ice, no rubble): last winters' snow
                                     : c.ice() - y >= BLUE_ICE_DEPTH || y == c.ice() && c.cover() == Terrain.Cover.BARE_ICE ? BLUE_ICE : PACKED_ICE)
                             : SNOW;
+                    if (y <= caveTop && y > minY + Caves.FLOOR && caveField.air(lx, y, lz, c.ground() - y)) state = y < Caves.LAVA_BELOW ? LAVA : AIR;
+                    else if (y <= c.ground()) {
+                        solidTop = y;
+                        solidState = state;
+                    } else if (state == SNOW && solidTop < c.ground()) state = AIR; // no snow over a cave's open mouth
                     int index = (y >> 4) - minSection; // chunk.getSectionIndex, without asking the chunk for its floor every block
                     if (index != sectionIndex) {
                         section = chunk.getSection(index);
@@ -237,6 +256,11 @@ public final class TectonicChunkGenerator extends NoiseBasedChunkGenerator {
                 if (wet && lowestNeighbourTop(cols, i) < c.water() - (RealTectonics.terrain().stillSteps ? 1 : 0))
                     chunk.markPosForPostprocessing(new BlockPos(x0 + lx, c.water(), z0 + lz));
                 BlockState surfaceBlock = s.top == null ? rock(c, c.ground()) : s.top;
+                if (solidTop < c.ground() && !held) { // a cave opens at the surface here: the highest solid block is lower down
+                    oceanFloor.update(lx, solidTop, lz, solidState);
+                    worldSurface.update(lx, solidTop, lz, solidState);
+                    continue;
+                }
                 oceanFloor.update(lx, glacier ? c.ice() : c.ground(), lz, glacier ? PACKED_ICE : surfaceBlock);
                 worldSurface.update(lx, top, lz, top == c.ground() ? surfaceBlock : wet ? WATER : hot ? LAVA : glacier ? PACKED_ICE : SNOW);
             }
@@ -299,6 +323,17 @@ public final class TectonicChunkGenerator extends NoiseBasedChunkGenerator {
 
     private static int landTop(Terrain.Column c) {
         return Math.max(c.ground(), c.water());
+    }
+
+    /** The noise caves of this world's RandomState, built on first use. */
+    private Caves caves(RandomState random) {
+        Caves c = caves;
+        if (cavesFor != random) {
+            c = new Caves(RealTectonics.registries(), random);
+            caves = c;
+            cavesFor = random;
+        }
+        return c;
     }
 
     private static int lowestNeighbourTop(Terrain.Column[] cols, int i) {
