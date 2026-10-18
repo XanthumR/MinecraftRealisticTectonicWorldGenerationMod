@@ -188,7 +188,10 @@ public final class TectonicChunkGenerator extends NoiseBasedChunkGenerator {
                 boolean shaded = landTop(cols[i + 18]) > landTop(cols[i - 18]);
                 Surface s = glacier ? GRAVEL : surface(c, slope, wet);
                 // Gameplay over realism (format 47): beds, bars, fans, moraines and scree lose their gray gravel patches.
-                if (!glacier && s == GRAVEL && RealTectonics.terrain().noGravel) s = wet ? BEACH : scree(c, slope) ? ROCK : COARSE;
+                // From format 53 the land ones get the biome's own ground, as if no gravel lay there, not coarse dirt.
+                if (!glacier && s == GRAVEL && RealTectonics.terrain().noGravel) s = wet ? BEACH : scree(c, slope) ? ROCK
+                        : RealTectonics.terrain().plainGround ? surface(new Terrain.Column(c.ground(), c.water(), c.lava(), c.ice(), c.biome(), c.fold(),
+                                c.volcanic(), c.rock(), Terrain.Cover.NONE), slope, wet) : COARSE;
                 if (!glacier && !wet && RealTectonics.terrain().gentleShores) s = dryEdge(s, c, x0 + lx, z0 + lz);
                 if (!glacier && !wet) s = moddedGround(chunk, s, c, x0 + lx, z0 + lz);
                 if (!glacier && !wet && !scree(c, slope) && alpine(c.biome()) && !snowStays(slope, shaded, RealTectonics.terrain().patch(x0 + lx, z0 + lz)))
@@ -224,7 +227,10 @@ public final class TectonicChunkGenerator extends NoiseBasedChunkGenerator {
                     section.setBlockState(lx, y & 15, lz, state, false);
                 }
                 // Where a river steps down a block, let the edge water flow when the chunk loads: rapids, not a frozen wall.
-                if (wet && lowestNeighbourTop(cols, i) < c.water()) chunk.markPosForPostprocessing(new BlockPos(x0 + lx, c.water(), z0 + lz));
+                // From format 54 only falls of two or more: over a one-block step the water spreads as a sheet on the water below,
+                // and at each inner corner of a diagonal step, between two sources, Minecraft makes it a new source that spreads on.
+                if (wet && lowestNeighbourTop(cols, i) < c.water() - (RealTectonics.terrain().stillSteps ? 1 : 0))
+                    chunk.markPosForPostprocessing(new BlockPos(x0 + lx, c.water(), z0 + lz));
                 BlockState surfaceBlock = s.top == null ? rock(c, c.ground()) : s.top;
                 oceanFloor.update(lx, glacier ? c.ice() : c.ground(), lz, glacier ? PACKED_ICE : surfaceBlock);
                 worldSurface.update(lx, top, lz, top == c.ground() ? surfaceBlock : wet ? WATER : hot ? LAVA : glacier ? PACKED_ICE : SNOW);
