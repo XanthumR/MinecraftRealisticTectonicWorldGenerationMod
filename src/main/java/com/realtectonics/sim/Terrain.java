@@ -224,6 +224,7 @@ public final class Terrain {
     private final boolean noDeltas;       // no deltas (the user: they look weird, thin marsh fingers between wide channels): format 49
     private final boolean openChannels;   // a river's channel runs on past the coastline at its depth, not into the beach's ramp: format 50
     private final boolean flatOxbows;     // oxbow lakes only on low floodplain, not dug as walled pits into high banks: format 51
+    private final boolean deepBraids;     // a braided river keeps the plain river's channel down its middle, on land and past the coast: format 52
     public final boolean fastMath;        // distances by a plain square root instead of Math.hypot (same to the last bit or two); caves sealed from water only near it: format 43
     private final boolean smoothCones;    // collapse scars of even width, crater floors meet their own rim, peaks fade over lakes, lakes one biome: format 42
     private final int coneStyle;          // Volcano.ROUND, VARIED or SMOOTH_SCARS by format
@@ -330,6 +331,7 @@ public final class Terrain {
         noDeltas = data.format >= 49;
         openChannels = data.format >= 50;
         flatOxbows = data.format >= 51;
+        deepBraids = data.format >= 52;
         widthMask = (data.w & (data.w - 1)) == 0 ? data.w - 1 : -1;
         coneStyle = smoothCones ? Volcano.SMOOTH_SCARS : variedVolcanoes ? Volcano.VARIED : Volcano.ROUND;
         snowLine = data.format >= 18;
@@ -1140,7 +1142,10 @@ public final class Terrain {
             float low = landforms ? lowland(u, v) : 0;
             if (river.edge <= 0 && braided) { // shallow channels threading between gravel bars
                 boolean bar = fine(x, z, 16, 43) + 0.5f * fine(x, z, 64, 44) > BRAID_BARS;
-                ground = Math.min(ground, bar ? ry : ry - 1);
+                // From format 52 the plain river's channel runs on down the middle: braiding starts at a cell's edge,
+                // and a bed a block deep there met the channel above in a wall. Bars stand only on the shallows beside it.
+                int core = deepBraids ? channelDepth(x, z, river.edge + river.half, river.half / BRAID_WIDTH) : 0;
+                ground = Math.min(ground, core > 0 ? ry - 1 - core : bar ? ry : ry - 1);
                 water = ry;
                 cover = Cover.GRAVEL;
                 inRiver = true;
@@ -1172,8 +1177,10 @@ public final class Terrain {
         // the sea floods only below its surface, so that half block stood as a dry line of sand between river and sea.
         // From format 50 the channel runs on past the coastline as deep as it was: the beach's ramp rises to the
         // surface at the coast, so a deep river ended against an underwater wall across its mouth.
+        // A braided river's is the plain river's channel down its middle (from format 52; before, as deep as its widened shape).
         else if (openChannels && !inFjord && river.edge <= 0)
-            ground = Math.min(ground, SEA_Y - 2 - (organic ? bedDepth(x, z, river.edge + river.half, river.half) : (int) Math.min(5, river.half / 4)));
+            ground = Math.min(ground, SEA_Y - 2 - (braided && deepBraids ? channelDepth(x, z, river.edge + river.half, river.half / BRAID_WIDTH)
+                    : organic ? bedDepth(x, z, river.edge + river.half, river.half) : (int) Math.min(5, river.half / 4)));
         else if (openMouths && !inFjord && river.edge < BANK_WIDTH && ground == SEA_Y - 1) ground = SEA_Y - 2;
 
         // Deltas: the river drops its sediment as a low fan of marsh pushed out into the sea, crossed by channels.
@@ -1456,6 +1463,11 @@ public final class Terrain {
      * Blocks below the shallowest bed, at this distance from a channel's axis: deepest along the middle and
      * shelving up to the banks, with pools and shallow bars along its length. Wide rivers run deeper.
      */
+    /** Depth below the water of a channel half blocks wide, 0 beyond it: bedDepth, or the flat bed of planets before organic rivers. */
+    private int channelDepth(double x, double z, float fromAxis, float half) {
+        return fromAxis >= half ? 0 : organic ? bedDepth(x, z, fromAxis, half) : (int) Math.min(5, half / 4);
+    }
+
     private int bedDepth(double x, double z, float fromAxis, float half) {
         float across = 1 - (fromAxis / half) * (fromAxis / half); // 1 on the axis, 0 at the bank
         float deepest = Math.min(12, 1.5f + half / 3);
