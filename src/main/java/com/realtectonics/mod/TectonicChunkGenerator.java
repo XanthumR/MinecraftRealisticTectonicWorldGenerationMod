@@ -131,7 +131,8 @@ public final class TectonicChunkGenerator extends NoiseBasedChunkGenerator {
             CLAY = new Surface(Blocks.CLAY.defaultBlockState(), Blocks.DIRT.defaultBlockState(), false),
             SNOW_PACK = new Surface(Blocks.SNOW_BLOCK.defaultBlockState(), Blocks.PACKED_ICE.defaultBlockState(), false),
             ROCK = new Surface(null, null, false),
-            SCREE_STONE = new Surface(Blocks.COBBLESTONE.defaultBlockState(), Blocks.GRAVEL.defaultBlockState(), false);
+            SCREE_STONE = new Surface(Blocks.COBBLESTONE.defaultBlockState(), Blocks.GRAVEL.defaultBlockState(), false),
+            MAGMA_PATCH = new Surface(Blocks.MAGMA_BLOCK.defaultBlockState(), null, false); // hot rock breaking through an active volcano's ground (format 58)
 
     private final PlanetSettings planet;
 
@@ -194,6 +195,7 @@ public final class TectonicChunkGenerator extends NoiseBasedChunkGenerator {
                         : RealTectonics.terrain().plainGround ? surface(new Terrain.Column(c.ground(), c.water(), c.lava(), c.ice(), c.biome(), c.fold(),
                                 c.volcanic(), c.rock(), Terrain.Cover.NONE), slope, wet) : COARSE;
                 if (!glacier && !wet && RealTectonics.terrain().gentleShores) s = dryEdge(s, c, x0 + lx, z0 + lz);
+                if (!glacier && !wet && !hot && c.volcanic() && RealTectonics.terrain().magmaPatch(x0 + lx, z0 + lz)) s = MAGMA_PATCH;
                 if (!glacier && !wet) s = moddedGround(chunk, s, c, x0 + lx, z0 + lz);
                 if (!glacier && !wet && !scree(c, slope) && alpine(c.biome()) && !snowStays(slope, shaded, RealTectonics.terrain().patch(x0 + lx, z0 + lz)))
                     s = ROCK; // steep faces, ridges and wind-scoured patches stand bare above the snow
@@ -470,7 +472,7 @@ public final class TectonicChunkGenerator extends NoiseBasedChunkGenerator {
 
     /** Hot springs and their sinter stay clear of snow. */
     private static boolean warmGround(Surface s) {
-        return s == SPRING || s == SINTER || s == SINTER_STAINED;
+        return s == SPRING || s == SINTER || s == SINTER_STAINED || s == MAGMA_PATCH;
     }
 
     /**

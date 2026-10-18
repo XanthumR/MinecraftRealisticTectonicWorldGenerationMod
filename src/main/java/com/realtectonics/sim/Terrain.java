@@ -75,6 +75,7 @@ public final class Terrain {
     static final float CRATER_OWN = 4;    // blocks above its volcano's own cone the ground may stand and still be cut by its crater
     static final float ICE_EDGE = 12;     // blocks below the land the ice surface sinks at cells without ice, so glaciers thin to their edges
     static final float ICE_DRAPE = 12;    // blocks of ice at most over the rock, ~180 m at Mountains 1.0 (format 55; from 56 over the rock blurred ICE_BLUR wide)
+    static final double MAGMA_REACH = 0.6; // share of an active cone's reach out to which magma breaks through its ground in patches (format 58)
     static final int ICE_BLUR = 8;        // blocks: half-width of each of the two box means the rock is blurred by under glacier ice (format 56)
     static final float ICE_SUMMER_MAX = 15; // °C: summers this warm melt any glacier tongue that reaches them
     static final float LAKE_SILL = 0.25f;   // cells: width of the rock sill between two lakes at different levels
@@ -232,6 +233,7 @@ public final class Terrain {
     private final boolean drapedIce;      // glacier ice at most ICE_DRAPE thick, so it lies on the mountain instead of doming over it: format 55
     private final boolean blurredIce;     // that limit over the blurred rock (relaxTile), so the ice smooths over rock steps instead of copying them as walls: format 56
     public final boolean firn;            // above the snow line glacier ice lies under snow and firn (TectonicChunkGenerator.FIRN_DEPTH): format 57
+    private final boolean magmaVents;     // patches of magma on active volcanoes, thickest round the crater (magmaPatch): format 58
     public final boolean fastMath;        // distances by a plain square root instead of Math.hypot (same to the last bit or two); caves sealed from water only near it: format 43
     private final boolean smoothCones;    // collapse scars of even width, crater floors meet their own rim, peaks fade over lakes, lakes one biome: format 42
     private final int coneStyle;          // Volcano.ROUND, VARIED or SMOOTH_SCARS by format
@@ -344,6 +346,7 @@ public final class Terrain {
         drapedIce = data.format >= 55;
         blurredIce = data.format >= 56;
         firn = data.format >= 57;
+        magmaVents = data.format >= 58;
         widthMask = (data.w & (data.w - 1)) == 0 ? data.w - 1 : -1;
         coneStyle = smoothCones ? Volcano.SMOOTH_SCARS : variedVolcanoes ? Volcano.VARIED : Volcano.ROUND;
         snowLine = data.format >= 18;
@@ -902,6 +905,22 @@ public final class Terrain {
             heat = Math.max(heat, 1 - smoothstep((float) ((d - c.craterRadius()) / ((CRATER_HEAT - 1) * c.craterRadius()))));
         }
         return heat;
+    }
+
+    /**
+     * From format 58: whether real block (x, z) on an active volcano is a patch of magma, where hot rock and gas break
+     * through cracks and vents. Patches a few blocks across, most round the crater, fewer down to MAGMA_REACH of the cone.
+     */
+    public boolean magmaPatch(int realX, int realZ) {
+        if (!magmaVents) return false;
+        double x = realX / (double) zoom, z = realZ / (double) zoom;
+        float heat = 0;
+        for (Cone c : conesNear(x, z)) {
+            if (!c.v().active() || c.collapsed()) continue;
+            double d = hyp(wrapBlocks(x - c.x()), z - c.z());
+            heat = Math.max(heat, 1 - smoothstep((float) (d / (MAGMA_REACH * c.reach()))));
+        }
+        return heat > 0 && fine(x, z, 8, 91) + 0.5f * fine(x, z, 4, 92) > 1.1f - 0.6f * heat;
     }
 
     /** Mean of f over the (2r+1) square around each point of an n x n grid; edges average what they have. */
