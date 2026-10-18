@@ -225,6 +225,8 @@ public final class Terrain {
     private final boolean openChannels;   // a river's channel runs on past the coastline at its depth, not into the beach's ramp: format 50
     private final boolean flatOxbows;     // oxbow lakes only on low floodplain, not dug as walled pits into high banks: format 51
     private final boolean deepBraids;     // a braided river keeps the plain river's channel down its middle, on land and past the coast: format 52
+    public final boolean plainGround;     // where gravel was on land, the biome's own ground, not coarse dirt (the user: remove the patches): format 53
+    public final boolean stillSteps;      // a river's one-block steps are not set flowing at load, only falls of two or more: format 54
     public final boolean fastMath;        // distances by a plain square root instead of Math.hypot (same to the last bit or two); caves sealed from water only near it: format 43
     private final boolean smoothCones;    // collapse scars of even width, crater floors meet their own rim, peaks fade over lakes, lakes one biome: format 42
     private final int coneStyle;          // Volcano.ROUND, VARIED or SMOOTH_SCARS by format
@@ -332,6 +334,8 @@ public final class Terrain {
         openChannels = data.format >= 50;
         flatOxbows = data.format >= 51;
         deepBraids = data.format >= 52;
+        plainGround = data.format >= 53;
+        stillSteps = data.format >= 54;
         widthMask = (data.w & (data.w - 1)) == 0 ? data.w - 1 : -1;
         coneStyle = smoothCones ? Volcano.SMOOTH_SCARS : variedVolcanoes ? Volcano.VARIED : Volcano.ROUND;
         snowLine = data.format >= 18;
