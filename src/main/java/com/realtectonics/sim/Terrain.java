@@ -124,6 +124,7 @@ public final class Terrain {
     static final float CENOTE_RAIN = 1200, CENOTE_SHARE = 0.4f; // wet karst: share of sinkholes that are water-filled cenotes
     static final float BRAID_WIDTH = 2, BRAID_BARS = 0.25f;   // braided meltwater rivers: how much wider, and how much of them is gravel bar
     static final float OXBOW_FLOW = 300;                      // rivers this big leave oxbow lakes on their floodplains
+    static final int OXBOW_RISE = 2;                          // blocks a bank may stand above the river and still be floodplain an oxbow lies on (format 51)
     static final float CIRQUE_WIDTH = 1.4f;              // cirque bowl radius, in trough half widths
     static final float MORAINE_HEIGHT = 10;              // blocks of rubble across a valley where its glacier ended
     static final float HORN_METRES = 2500, HORN_HEIGHT = 60, HORN_RADIUS = 72; // glaciated summits above this get pyramid peaks
@@ -218,6 +219,11 @@ public final class Terrain {
     private final boolean longWinters;    // snow, lake ice and snowy taiga only where frozen two-thirds of the year, not half: format 45
     private final boolean activeSummits;  // an erupting volcano's summit buries the massif's ridges round its crater: format 45
     private final boolean baseLevel;      // block-scale relief never digs below the nearest river's surface: format 46
+    public final boolean noGravel;        // no gravel on top (the user: realistic, but it looks bad in play): sand under water, coarse dirt or stone on land: format 47
+    private final boolean openMouths;     // a river's channel reaches land that rounds to sea level, so no dry sand line parts it from the sea: format 48
+    private final boolean noDeltas;       // no deltas (the user: they look weird, thin marsh fingers between wide channels): format 49
+    private final boolean openChannels;   // a river's channel runs on past the coastline at its depth, not into the beach's ramp: format 50
+    private final boolean flatOxbows;     // oxbow lakes only on low floodplain, not dug as walled pits into high banks: format 51
     public final boolean fastMath;        // distances by a plain square root instead of Math.hypot (same to the last bit or two); caves sealed from water only near it: format 43
     private final boolean smoothCones;    // collapse scars of even width, crater floors meet their own rim, peaks fade over lakes, lakes one biome: format 42
     private final int coneStyle;          // Volcano.ROUND, VARIED or SMOOTH_SCARS by format
@@ -319,6 +325,11 @@ public final class Terrain {
         longWinters = data.format >= 45;
         activeSummits = data.format >= 45;
         baseLevel = data.format >= 46;
+        noGravel = data.format >= 47;
+        openMouths = data.format >= 48;
+        noDeltas = data.format >= 49;
+        openChannels = data.format >= 50;
+        flatOxbows = data.format >= 51;
         widthMask = (data.w & (data.w - 1)) == 0 ? data.w - 1 : -1;
         coneStyle = smoothCones ? Volcano.SMOOTH_SCARS : variedVolcanoes ? Volcano.VARIED : Volcano.ROUND;
         snowLine = data.format >= 18;
@@ -483,7 +494,7 @@ public final class Terrain {
             for (int dy = -3; dy <= 3; dy++)
                 for (int dx = -3; dx <= 3; dx++) deltasByCellFans.add(cell(c % w + dx, c / w + dy), fan);
         }
-        for (int c = 0; lowlandRivers && c < w * h; c++) {
+        for (int c = 0; lowlandRivers && !noDeltas && c < w * h; c++) { // from format 49 none: rivers meet the sea at a plain mouth
             int r = data.receiver[c];
             if (r < 0 || data.metres[c] < 0 || data.metres[r] >= 0 || data.metres[r] < DELTA_SHELF || data.flow[c] <= DELTA_FLOW
                     || data.ice[c] == Hydrology.FJORD || !Float.isNaN(data.lakeMetres[c])) continue;
@@ -1150,12 +1161,20 @@ public final class Terrain {
                 else if (landforms && ground <= ry + BANK_RISE && river.edge < BANK_WIDTH) cover = Cover.BANK; // sand, gravel or mud at the water's edge
                 // Oxbow lakes: loops the meandering river cut off, left as crescents of still water on its floodplain.
                 if (low > 0.5f && river.flow > OXBOW_FLOW && river.edge > 3 && river.edge < 0.8f * bank && fine(x, z, 64, 48) > 0.35f
+                        && (!flatOxbows || ground <= ry + OXBOW_RISE) // from format 51 only on the floodplain, not cut into a cliff
                         && oxbowAt(x, z, u, v).edge < 0) {
                     ground = ry - 2;
                     water = ry;
                 }
             }
         }
+        // From format 48 land the river left to the sea (just under its surface) but that rounds up to it is sea floor:
+        // the sea floods only below its surface, so that half block stood as a dry line of sand between river and sea.
+        // From format 50 the channel runs on past the coastline as deep as it was: the beach's ramp rises to the
+        // surface at the coast, so a deep river ended against an underwater wall across its mouth.
+        else if (openChannels && !inFjord && river.edge <= 0)
+            ground = Math.min(ground, SEA_Y - 2 - (organic ? bedDepth(x, z, river.edge + river.half, river.half) : (int) Math.min(5, river.half / 4)));
+        else if (openMouths && !inFjord && river.edge < BANK_WIDTH && ground == SEA_Y - 1) ground = SEA_Y - 2;
 
         // Deltas: the river drops its sediment as a low fan of marsh pushed out into the sea, crossed by channels.
         boolean marsh = false;

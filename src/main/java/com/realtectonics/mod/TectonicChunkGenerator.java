@@ -191,6 +191,8 @@ public final class TectonicChunkGenerator extends ChunkGenerator {
                 // Which way the ground faces: rising toward the south means a north face, shaded, where snow lasts.
                 boolean shaded = landTop(cols[i + 18]) > landTop(cols[i - 18]);
                 Surface s = glacier ? GRAVEL : surface(c, slope, wet);
+                // Gameplay over realism (format 47): beds, bars, fans, moraines and scree lose their gray gravel patches.
+                if (!glacier && s == GRAVEL && RealTectonics.terrain().noGravel) s = wet ? BEACH : scree(c, slope) ? ROCK : COARSE;
                 if (!glacier && !wet && RealTectonics.terrain().gentleShores) s = dryEdge(s, c, x0 + lx, z0 + lz);
                 if (!glacier && !wet) s = moddedGround(chunk, s, c, x0 + lx, z0 + lz);
                 if (!glacier && !wet && !scree(c, slope) && alpine(c.biome()) && !snowStays(slope, shaded, RealTectonics.terrain().patch(x0 + lx, z0 + lz)))
@@ -480,9 +482,18 @@ public final class TectonicChunkGenerator extends ChunkGenerator {
     public void applyBiomeDecoration(WorldGenLevel level, ChunkAccess chunk, StructureManager structures) {
         super.applyBiomeDecoration(level, chunk, structures);
         Terrain terrain = RealTectonics.terrain();
-        if (!terrain.snowLine) return;
         BlockPos.MutableBlockPos pos = new BlockPos.MutableBlockPos(), below = new BlockPos.MutableBlockPos();
         int x0 = chunk.getPos().getMinBlockX(), z0 = chunk.getPos().getMinBlockZ();
+        // Vanilla's river and ocean biomes lay round gravel disks on the bed; in shallow braided rivers they read as gray
+        // blotches at the surface, so the bed's top block goes back to sand (format 47).
+        if (terrain.noGravel)
+            for (int lz = 0; lz < 16; lz++)
+                for (int lx = 0; lx < 16; lx++) {
+                    int x = x0 + lx, z = z0 + lz, y = level.getHeight(Heightmap.Types.OCEAN_FLOOR, x, z) - 1;
+                    if (level.getBlockState(pos.set(x, y, z)).is(Blocks.GRAVEL) && !level.getFluidState(below.set(x, y + 1, z)).isEmpty())
+                        level.setBlock(pos, Blocks.SAND.defaultBlockState(), 2);
+                }
+        if (!terrain.snowLine) return;
         for (int lz = 0; lz < 16; lz++)
             for (int lx = 0; lx < 16; lx++) {
                 int x = x0 + lx, z = z0 + lz, y = level.getHeight(Heightmap.Types.WORLD_SURFACE, x, z) - 1;
