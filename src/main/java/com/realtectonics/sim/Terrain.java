@@ -235,6 +235,7 @@ public final class Terrain {
     public final boolean firn;            // above the snow line glacier ice lies under snow and firn (TectonicChunkGenerator.FIRN_DEPTH): format 57
     private final boolean magmaVents;     // patches of magma on active volcanoes, thickest round the crater (magmaPatch): format 58
     public final boolean noiseCaves;      // vanilla's noise caves under the terrain (mod.Caves): format 59
+    public final boolean undergroundBiomes; // dripstone under limestone, lush caves under wet climates, the deep dark under old high crust (TectonicBiomeSource): format 60
     public final boolean fastMath;        // distances by a plain square root instead of Math.hypot (same to the last bit or two); caves sealed from water only near it: format 43
     private final boolean smoothCones;    // collapse scars of even width, crater floors meet their own rim, peaks fade over lakes, lakes one biome: format 42
     private final int coneStyle;          // Volcano.ROUND, VARIED or SMOOTH_SCARS by format
@@ -349,6 +350,7 @@ public final class Terrain {
         firn = data.format >= 57;
         magmaVents = data.format >= 58;
         noiseCaves = data.format >= 59;
+        undergroundBiomes = data.format >= 60;
         widthMask = (data.w & (data.w - 1)) == 0 ? data.w - 1 : -1;
         coneStyle = smoothCones ? Volcano.SMOOTH_SCARS : variedVolcanoes ? Volcano.VARIED : Volcano.ROUND;
         snowLine = data.format >= 18;
