@@ -29,6 +29,7 @@ dependencies {
     clientMods 'maven.modrinth:modmenu:iRo7AZXf'        // 20.0.3
     clientMods 'maven.modrinth:orthocamera:nURmQGL6'    // 0.1.11+26.2: orthographic view (needs Sodium's block face culling off)
     // Both sides: Biomes O' Plenty lets new worlds pick its realistic biomes (TectonicBiomeSource "biomesoplenty" pack).
+    localRuntime 'maven.modrinth:streams-reflowing:t9NK6sX3' // 2.15.2: extra streams carved over our terrain; vanillaWaterFlow=false in its config
     localRuntime 'maven.modrinth:biomes-o-plenty:MNZPk6V0' // 26.2.0.0.28
     localRuntime 'maven.modrinth:terrablender:KQix25Qc'
     localRuntime 'maven.modrinth:glitchcore:SDUCBYRU'

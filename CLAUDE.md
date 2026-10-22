@@ -112,7 +112,9 @@ come from `markLakes`.
   without them, as a real one would; on the server Voxy WorldGen's worker crashed loading Voxy's client classes): Sodium,
   Voxy (far terrain as LODs), Voxy WorldGen (generates chunks around the player in the background and feeds Voxy, so
   far terrain shows without exploring; settings in `run-fabric/config/voxyworldgenv2.json` or Mod Menu), Cloth Config,
-  Mod Menu, OrthoCamera (orthographic view; Sodium's block face culling must be off for it). Both sides (`localRuntime`): Biomes O' Plenty with TerraBlender and GlitchCore.
+  Mod Menu, OrthoCamera (orthographic view; Sodium's block face culling must be off for it). Both sides (`localRuntime`): Biomes O' Plenty with TerraBlender and GlitchCore, and Streams Reflowing (its own streams
+  carved over our terrain, ~44 chunks/s on land vs ~90 without; `vanillaWaterFlow=false` in `run-*/config/streamsreflowing.properties`,
+  or our rivers' one-block steps spread as sheets).
 
 ## Style
 - Ponytail: minimal code, reuse helpers in `Terrain` (`noise`/`fine`/`cubic`/`bilinear`/`smoothstep`/`hash01`/`wrapBlocks`/`cell`).
