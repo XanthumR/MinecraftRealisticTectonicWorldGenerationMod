@@ -73,7 +73,7 @@ public final class PlanetScreen extends Screen {
             simulate();
         }
         int cx = width / 2, y = 24 + mapWidth() / 2 + 8;
-        addRenderableWidget(new Slider(cx - 155, y, "Plates", 6, 30, settings.plates(), false, true, v -> settings = settings.withPlates((int) v)));
+        addRenderableWidget(new Slider(cx - 155, y, "Plates", 6, 60, settings.plates(), false, true, v -> settings = settings.withPlates((int) v)));
         addRenderableWidget(new Slider(cx + 5, y, "Ocean", 0.5, 0.85, settings.oceanFraction(), true, true, v -> settings = settings.withOceanFraction((float) v)));
         y += 24;
         addRenderableWidget(CycleButton.<Integer>builder(w -> Component.literal(w < 1024 ? "Small" : w == 1024 ? "Medium" : w == 2048 ? "Large (slow)" : "Huge (~2 min, 4 GB RAM)"), settings.width())

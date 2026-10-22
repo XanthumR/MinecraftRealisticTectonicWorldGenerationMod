@@ -54,10 +54,18 @@ public final class Planet {
     static final float COAST_WARP = 120;          // cells the supercontinent's outline is pushed around: arms and bays, not a disc
     static final float SUPERCONTINENT_PLATES = 0.4f; // share of the plates born under the supercontinent: the pieces it breaks into
     static final float RIFT_ROUGHNESS = 0.6f;     // noise persistence of the ground plates grow through: how ragged their edges are
+    /**
+     * From format 62: Earth's plates by share of its surface, largest first (PB2002, Bird 2003, rounded): 7 major plates
+     * (~80%), 9 minor ones (~15%), then microplates. A planet of N plates aims for the N largest, rescaled to the whole.
+     */
+    static final double[] EARTH_PLATES = {0.205, 0.115, 0.114, 0.109, 0.095, 0.090, 0.082,
+            0.037, 0.031, 0.024, 0.017, 0.011, 0.010, 0.0095, 0.0064, 0.0059};
+    static final double MICRO_FIRST = 0.0045, MICRO_RATIO = 0.86; // the microplates after them: shares falling geometrically
     static final float SHAPE_PULL = 0.7f;         // how strongly the supercontinent's crust gathers round its centre, against the noise
 
     public final int w, h;
     public final Plate[] plates;
+    private double[] shares;     // from format 62: the share of the surface each plate slot aims for (plateShares); null on Earth
     public final float[] height; // composited crust thickness per global cell
     public final int[] owner;    // plate index per global cell
     public final float[] subduction; // recent subduction per cell: arc volcanoes rise behind active trenches
@@ -149,25 +157,54 @@ public final class Planet {
         float[] tough = Noise.fbm(w, h, w / 16, 2, rnd, RIFT_ROUGHNESS);
         int[] own = new int[w * h];
         Arrays.fill(own, -1);
-        double[] growth = new double[count];
-        PriorityQueue<double[]> queue = new PriorityQueue<>((a, b) -> Double.compare(a[0], b[0]));
+        double[] growth = new double[count], target = plateShares(count);
+        shares = target;
+        int[] starts = new int[count];
         for (int p = 0; p < count; p++) {
-            growth[p] = 0.5 + rnd.nextDouble() * 1.5; // low = big plate
+            growth[p] = 1 / Math.sqrt(target[p]); // a plate's area goes about as 1 / growth²: low = big plate
             int start = rnd.nextInt(w * h);
             // From format 39 a share of the plates start inside the supercontinent, so it is always torn into pieces.
+            // The largest come first, as Earth's continents ride its biggest plates.
             for (int tries = 0; p < SUPERCONTINENT_PLATES * count && height[start] < SEA_LEVEL && tries < 1000; tries++) start = rnd.nextInt(w * h);
-            queue.add(new double[]{0, start, p});
+            starts[p] = start;
         }
-        while (!queue.isEmpty()) {
-            double[] e = queue.poll();
-            int g = (int) e[1], p = (int) e[2];
-            if (own[g] != -1) continue;
-            own[g] = p;
-            int x = g % w, y = g / w;
-            for (int n : new int[]{Math.floorMod(x - 1, w) + y * w, (x + 1) % w + y * w, y > 0 ? g - w : -1, y < h - 1 ? g + w : -1})
-                if (n >= 0 && own[n] == -1) queue.add(new double[]{e[0] + growth[p] * (0.2 + tough[n] * tough[n]) * (1 + rnd.nextDouble()), n, p});
+        // Each plate grows until it holds its share; the fastest would otherwise run over the slow ones. Ground walled in
+        // by full plates then goes to whichever reaches it first, in a second round without limits.
+        int[] area = new int[count];
+        PriorityQueue<double[]> queue = new PriorityQueue<>((a, b) -> Double.compare(a[0], b[0]));
+        for (int p = 0; p < count; p++) queue.add(new double[]{0, starts[p], p});
+        for (int round = 0; round < 2; round++) {
+            while (!queue.isEmpty()) {
+                double[] e = queue.poll();
+                int g = (int) e[1], p = (int) e[2];
+                if (own[g] != -1 || round == 0 && area[p] >= target[p] * w * h) continue;
+                own[g] = p;
+                area[p]++;
+                int x = g % w, y = g / w;
+                for (int n : new int[]{Math.floorMod(x - 1, w) + y * w, (x + 1) % w + y * w, y > 0 ? g - w : -1, y < h - 1 ? g + w : -1})
+                    if (n >= 0 && own[n] == -1) queue.add(new double[]{e[0] + growth[p] * (0.2 + tough[n] * tough[n]) * (1 + rnd.nextDouble()), n, p});
+            }
+            for (int g = 0; g < w * h; g++) {
+                if (own[g] != -1) continue;
+                int x = g % w, y = g / w;
+                for (int n : new int[]{Math.floorMod(x - 1, w) + y * w, (x + 1) % w + y * w, y > 0 ? g - w : -1, y < h - 1 ? g + w : -1})
+                    if (n >= 0 && own[n] != -1) queue.add(new double[]{0, g, own[n]});
+            }
         }
         return own;
+    }
+
+    /** Share of the surface each of count plates aims for, largest first: Earth's largest count plates, rescaled. */
+    public static double[] plateShares(int count) {
+        double[] s = new double[count];
+        double sum = 0, micro = MICRO_FIRST;
+        for (int p = 0; p < count; p++) {
+            s[p] = p < EARTH_PLATES.length ? EARTH_PLATES[p] : micro;
+            if (p >= EARTH_PLATES.length) micro *= MICRO_RATIO;
+            sum += s[p];
+        }
+        for (int p = 0; p < count; p++) s[p] /= sum;
+        return s;
     }
 
     /**
@@ -590,8 +627,13 @@ public final class Planet {
     private void recyclePlate(Centroids c) {
         int dead = -1, largest = 0;
         for (int p = 0; p < plates.length; p++) {
-            if (c.area[p] > c.area[largest]) largest = p;
-            if (c.area[p] < w * h * MIN_PLATE_FRACTION && (dead < 0 || c.area[p] < c.area[dead])) dead = p;
+            // From format 62 the slot rifts the plate furthest past its share, not simply the largest: halving the
+            // largest every time a microplate died ground the big plates down until all were alike.
+            if (shares == null ? c.area[p] > c.area[largest] : c.area[p] / shares[p] > c.area[largest] / shares[largest]) largest = p;
+            // From format 62 a microplate is welded on only once it has shrunk to a quarter of its share: at a fixed
+            // 1/400 Earth's microplates died at once, their slots split the largest plates, and all ended alike.
+            double min = shares == null ? MIN_PLATE_FRACTION : Math.min(MIN_PLATE_FRACTION, shares[p] / 4);
+            if (c.area[p] < w * h * min && (dead < 0 || c.area[p] < c.area[dead])) dead = p;
         }
         if (dead < 0) return;
         Plate d = plates[dead], big = plates[largest];

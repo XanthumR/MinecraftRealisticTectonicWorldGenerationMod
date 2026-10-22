@@ -60,6 +60,7 @@ public final class Terrain {
     static final float RIPARIAN_MM = 700, RIPARIAN_FLOW = 2000, RIPARIAN_REACH = 48; // format 38: rain-equivalent a big river's groundwater gives its banks; flow that counts as big; blocks its green strip reaches
     static final float FROZEN_MOST = 0.5f; // format 45: cos(60°), the shift that makes a 0 °C test mean frozen two-thirds of the year
     static final float BASE_GRADE = 0.1f;  // format 46: blocks the lowest allowed ground rises per block away from a river's bank
+    static final float BASE_FULL = 16, BASE_FADE = 32; // format 61: blocks from the bank the base level holds fully, then fades out over
     static final float CRATER_HEAT = 2.5f;            // format 38: craters' radii from an active vent within which its heat keeps ice off
     static final float CHERRY_PATCH = 0.45f, BADLANDS_METRES = 500; // cherry groves are rare; deserts this high are badlands
     static final float SOFT_BADLANDS_METRES = 800; // format 44: sedimentary deserts this high are badlands
@@ -236,6 +237,8 @@ public final class Terrain {
     private final boolean magmaVents;     // patches of magma on active volcanoes, thickest round the crater (magmaPatch): format 58
     public final boolean noiseCaves;      // vanilla's noise caves under the terrain (mod.Caves): format 59
     public final boolean undergroundBiomes; // dripstone under limestone, lush caves under wet climates, the deep dark under old high crust (TectonicBiomeSource): format 60
+    private final boolean baseFade;       // the base level fades out away from the river instead of ending where the river search does: format 61
+    private final boolean wrappedRims;    // a crater floor finds its rim across the planet's seam too (format 42 used the unwrapped offset): format 62
     public final boolean fastMath;        // distances by a plain square root instead of Math.hypot (same to the last bit or two); caves sealed from water only near it: format 43
     private final boolean smoothCones;    // collapse scars of even width, crater floors meet their own rim, peaks fade over lakes, lakes one biome: format 42
     private final int coneStyle;          // Volcano.ROUND, VARIED or SMOOTH_SCARS by format
@@ -351,6 +354,8 @@ public final class Terrain {
         magmaVents = data.format >= 58;
         noiseCaves = data.format >= 59;
         undergroundBiomes = data.format >= 60;
+        baseFade = data.format >= 61;
+        wrappedRims = data.format >= 62;
         widthMask = (data.w & (data.w - 1)) == 0 ? data.w - 1 : -1;
         coneStyle = smoothCones ? Volcano.SMOOTH_SCARS : variedVolcanoes ? Volcano.VARIED : Volcano.ROUND;
         snowLine = data.format >= 18;
@@ -1090,8 +1095,13 @@ public final class Terrain {
         // massif valleys, hills) knows nothing of rivers, and dug hollows beside them deeper than their water, leaving
         // rivers perched on thin levees above their own valley. Relief may still lower the land, but not below the
         // nearest river's surface plus a gentle grade away from it, nor below the planet's own surface.
-        if (baseLevel && river != NO_RIVER && river.y >= SEA_Y)
-            ground = Math.max(ground, Math.round(Math.min(smooth, river.y + 1 + BASE_GRADE * Math.max(0, river.edge))));
+        // From format 61 the raise fades out from BASE_FULL to BASE_FULL + BASE_FADE blocks off the bank: it ran out of
+        // the river's reach in full, so a creek above a valley stood the land up to a flat table ending in a cliff.
+        if (baseLevel && river != NO_RIVER && river.y >= SEA_Y) {
+            float floor = Math.min(smooth, river.y + 1 + BASE_GRADE * Math.max(0, river.edge));
+            if (baseFade && floor > ground) floor = ground + (floor - ground) * (1 - smoothstep((river.edge - BASE_FULL) / BASE_FADE));
+            ground = Math.max(ground, Math.round(floor));
+        }
         River valley = nearestRiver(u, v, Hydrology.GLACIATED, Hydrology.GLACIER_AREA);
         int ry = Math.max((int) Math.floor(river.y), SEA_Y - 1), vy = Math.max((int) Math.floor(valley.y), SEA_Y - 1), ice = Column.NO_WATER;
         // Ice Age glaciers left U-shaped troughs: flat floors, walls steepening upwards. Where they cut below today's
@@ -1319,7 +1329,8 @@ public final class Terrain {
                 float kept = rampShores ? smoothstep((ground - coneY(c, x, z) - CRATER_OWN) / c.craterDepth) : 0;
                 // From format 42 the pit's walls rise to the rim on their own side, from its lowest point at the middle,
                 // instead of the whole floor sitting below the rim's lowest notch under sheer walls on the high sides.
-                float rimHere = smoothCones && d > 0 ? rim + (coneY(c, c.x + (x - c.x) * c.craterRadius / d, c.z + (z - c.z) * c.craterRadius / d) - rim) * (float) (d / c.craterRadius) : rim;
+                double off = wrappedRims ? wrapBlocks(x - c.x) : x - c.x;
+                float rimHere = smoothCones && d > 0 ? rim + (coneY(c, c.x + off * c.craterRadius / d, c.z + (z - c.z) * c.craterRadius / d) - rim) * (float) (d / c.craterRadius) : rim;
                 int pit = Math.round(rimHere - c.craterDepth * (1 - (float) (d * d / (c.craterRadius * c.craterRadius))) + wobble);
                 ground = Math.round(pit + kept * Math.max(0, ground - pit));
             } else if (d < c.reach() && !simCalderas) { // from format 22 the summit is sharpened in surface(), before the rivers

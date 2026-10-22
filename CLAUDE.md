@@ -60,7 +60,7 @@ come from `markLakes`.
 - Every change to how terrain looks goes behind a **format flag**:
   - Bump `PlanetData.FORMAT`, add a line to its comment, and add a `private final boolean x; // ...: format N` field in `Terrain`.
   - Set it as `x = data.format >= N` and gate the new code on it. Old worlds keep their look and get no chunk seams.
-  - Current format: **60**. `docs/FORMATS.md` says what each format added and why (most fix a bug the user saw);
+  - Current format: **62**. `docs/FORMATS.md` says what each format added and why (most fix a bug the user saw);
     read its "recurring causes" before fixing an unnatural spot: stamps, on/off thresholds, unstable updates, tile seams.
 - Noise and grid spacings must be **powers of two** (the planet wraps; the seam test fails otherwise).
 - Water must never spill onto lower dry ground. Waterfalls dropping into lower water are fine. Every new water or terrain feature gets a spill check.
@@ -97,7 +97,7 @@ come from `markLakes`.
 - **Look at renders before claiming terrain looks right.** `tools/README.md` lists the maintained checks (run them after any
   terrain change), the renderers, and the recipe for the user's "is this natural?" screenshots (player position from
   `nbt.py` → `topmap.jsh` → `uview3d.jsh` → `uprofile.jsh` across the spot). The other ~190 scripts are one-offs.
-- Spill checks must count glacier ice as a wall (`max(ground, water, ice)`). `falls.jsh` baseline is 6 column edges on seed 777 since format 52 (braided rivers keep a channel), 12 since the blocking, monsoon-regime, coast-wind and plateau-warmth climate changes (4 and 23 before; rivers move with the rain) (most along river reaches whose banks stand 1-2
+- Spill checks must count glacier ice as a wall (`max(ground, water, ice)`). `falls.jsh` baseline is 4 column edges on seed 777 since format 62 (Earth-like plate sizes: a new planet), 6 since format 52 (braided rivers keep a channel), 12 since the blocking, monsoon-regime, coast-wind and plateau-warmth climate changes (4 and 23 before; rivers move with the rain) (most along river reaches whose banks stand 1-2
   blocks under the water: open, perched banks); `lakeleak.jsh` 0.
 - Dev server, for in-game checks:
   - It runs in `run-server/` (client-only mods would crash a server). The dev client runs in `run-fabric/`, not `run/`:
@@ -112,7 +112,7 @@ come from `markLakes`.
   without them, as a real one would; on the server Voxy WorldGen's worker crashed loading Voxy's client classes): Sodium,
   Voxy (far terrain as LODs), Voxy WorldGen (generates chunks around the player in the background and feeds Voxy, so
   far terrain shows without exploring; settings in `run-fabric/config/voxyworldgenv2.json` or Mod Menu), Cloth Config,
-  Mod Menu. Both sides (`localRuntime`): Biomes O' Plenty with TerraBlender and GlitchCore.
+  Mod Menu, OrthoCamera (orthographic view; Sodium's block face culling must be off for it). Both sides (`localRuntime`): Biomes O' Plenty with TerraBlender and GlitchCore.
 
 ## Style
 - Ponytail: minimal code, reuse helpers in `Terrain` (`noise`/`fine`/`cubic`/`bilinear`/`smoothstep`/`hash01`/`wrapBlocks`/`cell`).
