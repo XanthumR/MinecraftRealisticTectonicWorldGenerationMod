@@ -96,7 +96,8 @@ come from `markLakes`.
   - Afterwards: `stop`, remove the rcon lines, and `rm -rf run-server/world`.
   - **Never kill the user's client**; only stop processes I started.
 - Dev mods: Distant Horizons and Biomes O' Plenty (with TerraBlender, GlitchCore; pinned by Modrinth version id, since
-  version numbers are shared with the Forge builds) come from `build.gradle` runtimeOnly. Sodium 0.8.12 and Iris 1.8.14 sit in `run/mods`. Don't add them to both.
+  version numbers are shared with the Forge builds) come from `build.gradle` runtimeOnly, and Streams Reflowing (its own streams carved over our terrain, about half the
+  generation speed on land; `vanillaWaterFlow=false` in `run*/config/streamsreflowing.properties`, or our rivers' one-block steps spread as sheets). Sodium 0.8.12 and Iris 1.8.14 sit in `run/mods`. Don't add them to both.
 
 ## Style
 - Ponytail: minimal code, reuse helpers in `Terrain` (`noise`/`fine`/`cubic`/`bilinear`/`smoothstep`/`hash01`/`wrapBlocks`/`cell`).
