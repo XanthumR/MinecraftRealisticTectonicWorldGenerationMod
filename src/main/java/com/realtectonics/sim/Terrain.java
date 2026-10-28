@@ -117,6 +117,7 @@ public final class Terrain {
     static final int SPRING_AGE = 80, SPRING_GRID = 32;   // hotspot volcanoes younger than this still have hot springs; one per square at most
     static final float SPRING_CHANCE = 0.3f, GEYSER_SHARE = 0.2f, SPRING_FIELD = 0.35f;
     static final double SPRING_MARGIN = 8; // blocks: a spring and its rim stay this far inside its volcano's footprint
+    static final double CALDERA_WALL = 128; // blocks inside a collapsed caldera's edge over which neighbouring cones' shaping fades out: format 63
     static final float FAN_RAIN = 700, FAN_STEEP = 6, FAN_GENTLE = 4;   // dry mountain fronts: steep reach above, gentle below
     static final float FAN_RADIUS = 90, FAN_SLOPE = 0.12f;           // blocks out from the apex, and fall per block
     static final double FAN_SPREAD = Math.toRadians(75);             // half-angle of the cone
@@ -239,6 +240,7 @@ public final class Terrain {
     public final boolean undergroundBiomes; // dripstone under limestone, lush caves under wet climates, the deep dark under old high crust (TectonicBiomeSource): format 60
     private final boolean baseFade;       // the base level fades out away from the river instead of ending where the river search does: format 61
     private final boolean wrappedRims;    // a crater floor finds its rim across the planet's seam too (format 42 used the unwrapped offset): format 62
+    private final boolean calderaWalls;   // neighbouring cones' shaping fades across a caldera's edge instead of stopping at it: format 63
     public final boolean fastMath;        // distances by a plain square root instead of Math.hypot (same to the last bit or two); caves sealed from water only near it: format 43
     private final boolean smoothCones;    // collapse scars of even width, crater floors meet their own rim, peaks fade over lakes, lakes one biome: format 42
     private final int coneStyle;          // Volcano.ROUND, VARIED or SMOOTH_SCARS by format
@@ -356,6 +358,7 @@ public final class Terrain {
         undergroundBiomes = data.format >= 60;
         baseFade = data.format >= 61;
         wrappedRims = data.format >= 62;
+        calderaWalls = data.format >= 63;
         widthMask = (data.w & (data.w - 1)) == 0 ? data.w - 1 : -1;
         coneStyle = smoothCones ? Volcano.SMOOTH_SCARS : variedVolcanoes ? Volcano.VARIED : Volcano.ROUND;
         snowLine = data.format >= 18;
@@ -1032,15 +1035,19 @@ public final class Terrain {
         // From format 42 the sharpening fades out across a lake's shore band instead of stopping at its outline, which
         // left the cone standing as a wall round the lake.
         float lakeness = cubic(lakes, u, v), overLake = smoothCones ? 1 - smoothstep((lakeness - 0.02f) / SHORE_FULL) : 1;
-        boolean low = solidShores && (smoothCones ? insideCaldera(x, z) : lakeness > 0.02f || insideCaldera(x, z));
+        // From format 63 that fades in across the caldera's wall: an active neighbour burying the massif up to the
+        // caldera's edge but not inside left the old ridges standing as a wall along a circle (x 4710 z 3133).
+        float inside = calderaWalls ? insideCaldera(x, z, CALDERA_WALL) : insideCaldera(x, z, 0) > 0 ? 1 : 0;
+        boolean low = solidShores && (smoothCones ? inside >= 1 : lakeness > 0.02f || inside >= 1);
+        float open = 1 - (calderaWalls ? inside : 0);
         for (Cone c : simCalderas && !low ? conesNear(x, z) : List.<Cone>of()) {
             double d = hyp(wrapBlocks(x - c.x), z - c.z);
             if (c.collapsed || c.legacy || d >= c.reach()) continue;
-            float s = coneY(c, x, z) + rough * (1 + 0.02f * c.height), fade = overLake * smoothstep((float) ((c.reach() - d) / (0.1 * c.radius)));
+            float s = coneY(c, x, z) + rough * (1 + 0.02f * c.height), fade = open * overLake * smoothstep((float) ((c.reach() - d) / (0.1 * c.radius)));
             if (s > natural) natural += fade * (s - natural);
             // From format 45 an erupting volcano's summit buries the range it grew on: its lava covers any ridge of
             // the massif round the crater, which stood over the rim and left the crater without a lava lake.
-            else if (activeSummits && c.v.active()) natural -= (natural - s) * (1 - smoothstep((float) ((d - 2 * c.craterRadius) / (0.3 * c.radius))));
+            else if (activeSummits && c.v.active()) natural -= open * (natural - s) * (1 - smoothstep((float) ((d - 2 * c.craterRadius) / (0.3 * c.radius))));
         }
         return natural;
     }
@@ -1759,10 +1766,14 @@ public final class Terrain {
     }
 
     /** Within a collapsed volcano's caldera (and a little beyond its rim), in unzoomed blocks. */
-    private boolean insideCaldera(double x, double z) {
-        for (Cone c : conesNear(x, z))
-            if (c.collapsed && hyp(wrapBlocks(x - c.x), z - c.z) < 1.2 * Volcano.CALDERA_SHARE * c.radius) return true;
-        return false;
+    /** 1 deeper than wall blocks inside a collapsed caldera's edge, easing to 0 at it; with wall 0, above 0 anywhere inside. */
+    private float insideCaldera(double x, double z, double wall) {
+        float in = 0;
+        for (Cone c : conesNear(x, z)) {
+            double past = c.collapsed ? 1.2 * Volcano.CALDERA_SHARE * c.radius - hyp(wrapBlocks(x - c.x), z - c.z) : 0;
+            if (past > 0) in = Math.max(in, wall > 0 ? smoothstep((float) (past / wall)) : 1);
+        }
+        return in;
     }
 
     /** Ridged massif relief, 0 in the valleys to 1 on the crests: finer ridges ride on the bigger ones. */
