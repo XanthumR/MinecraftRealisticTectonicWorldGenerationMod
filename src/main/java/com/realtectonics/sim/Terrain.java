@@ -239,6 +239,7 @@ public final class Terrain {
     public final boolean noiseCaves;      // vanilla's noise caves under the terrain (mod.Caves): format 59
     public final boolean undergroundBiomes; // dripstone under limestone, lush caves under wet climates, the deep dark under old high crust (TectonicBiomeSource): format 60
     public final boolean openCaves;       // no cave pillars where the cave is open straight up to the sky (mod.Caves): format 72
+    private final boolean lakeOutlets;    // a lake's shore ring leaves the channel of a lower river leaving it open: format 73
     private final boolean baseFade;       // the base level fades out away from the river instead of ending where the river search does: format 61
     private final boolean wrappedRims;    // a crater floor finds its rim across the planet's seam too (format 42 used the unwrapped offset): format 62
     private final boolean calderaWalls;   // neighbouring cones' shaping fades across a caldera's edge instead of stopping at it: format 63
@@ -357,6 +358,7 @@ public final class Terrain {
         magmaVents = data.format >= 58;
         noiseCaves = data.format >= 59;
         openCaves = data.format >= 72;
+        lakeOutlets = data.format >= 73;
         undergroundBiomes = data.format >= 60;
         baseFade = data.format >= 61;
         wrappedRims = data.format >= 62;
@@ -1296,7 +1298,10 @@ public final class Terrain {
                 // The shore ring stands at the surface; past it the ground slopes down instead of ending in a wall
                 // where an outlet canyon has cut the land below the lake.
                 float taper = folds ? LAKE_TAPER * smoothstep((SHORE_FULL - lakeness) / (SHORE_FULL - 0.02f)) : 0;
-                ground = Math.max(ground, Math.round(ly - taper));
+                // From format 73 not across the channel of a river at or below the lake: the ring filled the outlet with a strip of
+                // land between the lake and its river (the user: "the lakes borders cut the river"); now the lake spills
+                // into it, a step from water to lower water.
+                if (!(lakeOutlets && water != Column.NO_WATER && water <= ly)) ground = Math.max(ground, Math.round(ly - taper));
                 // Salt flats: a desert lake shrinks and leaves its old bed as a flat white crust around it.
                 if (landforms && rain < SALT_RAIN && lakeness > 0.08f && ground <= ly + SALT_RISE && (!folds || ground >= ly - SALT_RISE)) {
                     ground = (int) ly;

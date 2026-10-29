@@ -50,9 +50,9 @@ come from `markLakes`.
 - Every change to how terrain looks goes behind a **format flag**:
   - Bump `PlanetData.FORMAT`, add a line to its comment, and add a `private final boolean x; // ...: format N` field in `Terrain`.
   - Set it as `x = data.format >= N` and gate the new code on it. Old worlds keep their look and get no chunk seams.
-  - Current format: **72** (no cave pillars under the open sky). Formats 65-71 (rain thinning with height, young rifts, side valleys, ores by province) were
+  - Current format: **73** (lake outlets open into their rivers). Formats 65-71 (rain thinning with height, young rifts, side valleys, ores by province) were
     tried and reverted with git at the user's request: planets saved at 65-71 no longer load (`load()` refuses them);
-    the next format after 72 is 73. `docs/FORMATS.md` says what each format added and why (most fix a bug the user saw);
+    the next format is 74. `docs/FORMATS.md` says what each format added and why (most fix a bug the user saw);
     read its "recurring causes" before fixing an unnatural spot: stamps, on/off thresholds, unstable updates, tile seams.
 - Noise and grid spacings must be **powers of two** (the planet wraps; the seam test fails otherwise).
 - Water must never spill onto lower dry ground. Waterfalls dropping into lower water are fine. Every new water or terrain feature gets a spill check.
@@ -72,7 +72,7 @@ come from `markLakes`.
   (terrain area time and an output hash that must not change in pure speed work). Profile with `jcmd <pid> JFR.start` or the
   `jdk.jfr.Recording` API inside jshell (the jshell JVM is killed, so -XX:StartFlightRecording never dumps).
 - Compile: `./gradlew compileJava -q`. Tests: `./gradlew test -q`. Jar: `./gradlew build -q`.
-- **`Terrain.column(double, double, boolean)` is ~7,550 bytes of bytecode; the JIT never compiles a method over 8,000**
+- **`Terrain.column(double, double, boolean)` is ~7,910 bytes of bytecode (90 to spare); the JIT never compiles a method over 8,000**
   (HotSpot's DontCompileHugeMethods), and the generator would then run interpreted, many times slower. Put new features in
   their own methods; check the size with `javap -c -p` (largest offset) after adding to it.
 - Speed work must keep `relaxhash.jsh` hashes: format 46 `acba683bd8c9b0cb` (`-Dfmt=46`), the file's own format
