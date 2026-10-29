@@ -5,6 +5,9 @@ d.format = Integer.getInteger("fmt", d.format); var t = new Terrain(d, Long.getL
 int cx = Integer.getInteger("cx"), cz = Integer.getInteger("cz"), n = Integer.getInteger("n", 192);
 double vx = Double.parseDouble(System.getProperty("v", "1"));
 var cs = new Terrain.Column[n * n];
+// Rockfall tiles one by one first (each builds its rows in parallel): many at once from the parallel loop below starve the
+// common pool and hang when the view spans several tiles.
+for (int z = cz - n / 2; z < cz + n / 2 + 256; z += 256) for (int x = cx - n / 2; x < cx + n / 2 + 256; x += 256) t.relaxedColumn(Math.min(x, cx + n / 2 - 1), Math.min(z, cz + n / 2 - 1));
 java.util.stream.IntStream.range(0, n).parallel().forEach(z -> { for (int x = 0; x < n; x++) cs[x + z * n] = t.relaxedColumn(cx + x - n / 2, cz + z - n / 2); });
 int lo = Integer.MAX_VALUE, hi = Integer.MIN_VALUE;
 for (var c : cs) { lo = Math.min(lo, c.ground()); hi = Math.max(hi, Math.max(Math.max(c.ground(), c.water()), c.ice())); }
