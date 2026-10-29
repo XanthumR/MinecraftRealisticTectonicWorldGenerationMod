@@ -64,6 +64,7 @@ public final class RealTectonics {
         NeoForge.EVENT_BUS.addListener(RealTectonics::onServerAboutToStart);
         NeoForge.EVENT_BUS.addListener(RealTectonics::onServerStarted);
         NeoForge.EVENT_BUS.addListener(RealTectonics::onPlayerTick);
+        NeoForge.EVENT_BUS.addListener(TectonicCommand::register);
     }
 
     /** The running planet, or null when no Tectonic Planet world is loaded in this game. */

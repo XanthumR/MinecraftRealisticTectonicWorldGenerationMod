@@ -2,6 +2,7 @@ package com.realtectonics.mod.client;
 
 import com.realtectonics.mod.RealTectonics;
 import com.realtectonics.mod.TectonicChunkGenerator;
+import com.realtectonics.sim.Drift;
 import com.realtectonics.sim.PlanetData;
 import com.realtectonics.sim.PlanetSettings;
 import com.realtectonics.sim.Terrain;
@@ -56,6 +57,9 @@ public final class PlanetScreen extends Screen {
     private long seed;
     private Future<?> job;
     private volatile double progress;
+    private volatile int[] drift;    // the plates as they stand while the simulation runs, shown until it finishes
+    private volatile int[] drawn;   // the frame on screen; a new one is coloured only once it is drawn
+    private int driftW, driftH;
     private volatile Result finished;
     private Result shown;
     private ResourceLocation textureId;
@@ -122,10 +126,16 @@ public final class PlanetScreen extends Screen {
         if (job != null) job.cancel(true);
         restartIn = -1;
         progress = 0;
+        drift = null;
         long s = seed;
         PlanetSettings ps = settings;
         job = worker.submit(() -> {
-            PlanetData d = PlanetData.generate(s, ps, p -> progress = p);
+            PlanetData d = PlanetData.generate(s, ps, p -> progress = p, planet -> {
+                if (drift != null && drift != drawn) return;
+                driftW = planet.w / 2;
+                driftH = planet.h / 2;
+                drift = Drift.of(planet).colors();
+            });
             Terrain terrain = new Terrain(d, s, ps.mountainScale(), ps.zoom(), ps.riverWidth());
             int[] rgb = terrain.mapColors(false);
             int spawn = terrain.spawnCell;
@@ -152,11 +162,16 @@ public final class PlanetScreen extends Screen {
         if (restartIn > 0 && --restartIn == 0) simulate();
         Result r = finished;
         if (r != shown && !stale(r)) show(r);
+        else if (stale(shown) && drift != null && drift != drawn) { // the next frame of the plates drifting
+            drawn = drift;
+            textureId = MapScreen.upload("realtectonics_planet_preview", drawn, driftW, driftH, textureId);
+        }
     }
 
     private void show(Result r) {
         textureId = MapScreen.upload("realtectonics_planet_preview", r.rgb, r.data.w, r.data.h, textureId);
         shown = r;
+        drawn = null;
     }
 
     @Override
@@ -164,9 +179,10 @@ public final class PlanetScreen extends Screen {
         super.render(g, mouseX, mouseY, partialTick);
         g.drawCenteredString(font, title, width / 2, 8, 0xFFFFFF);
         int mapW = mapWidth(), mapH = mapW / 2, x = (width - mapW) / 2, y = 24;
-        if (shown != null) g.blit(textureId, x, y, mapW, mapH, 0, 0, shown.data.w, shown.data.h, shown.data.w, shown.data.h);
+        if (stale(shown) && drawn != null) g.blit(textureId, x, y, mapW, mapH, 0, 0, driftW, driftH, driftW, driftH);
+        else if (shown != null) g.blit(textureId, x, y, mapW, mapH, 0, 0, shown.data.w, shown.data.h, shown.data.w, shown.data.h);
         else g.fill(x, y, x + mapW, y + mapH, 0xFF101820);
-        String status = stale(shown) ? String.format("Simulating planet... %d%%", (int) (progress * 100))
+        String status = stale(shown) ? String.format(progress < PlanetData.PLATES_SHARE ? "Plates drifting... %d%%" : "Rivers, climate and biomes... %d%%", (int) (progress * 100))
                 : String.format("Seed %d  |  %d%% land  |  highest peak %.1f km, y %d  |  + spawn", seed, Math.round(shown.landFraction * 100),
                 shown.peakMetres / 1000, Terrain.peakY(shown.peakMetres, settings.mountainScale()));
         g.drawCenteredString(font, status, width / 2, y + mapH - 12, 0xFFFFFF);
