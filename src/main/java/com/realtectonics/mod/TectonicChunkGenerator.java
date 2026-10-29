@@ -519,7 +519,6 @@ public final class TectonicChunkGenerator extends NoiseBasedChunkGenerator {
     public void applyBiomeDecoration(WorldGenLevel level, ChunkAccess chunk, StructureManager structures) {
         super.applyBiomeDecoration(level, chunk, structures);
         Terrain terrain = RealTectonics.terrain();
-        if (terrain.geologyOres) GeologyOres.place(level, chunk, terrain);
         BlockPos.MutableBlockPos pos = new BlockPos.MutableBlockPos(), below = new BlockPos.MutableBlockPos();
         int x0 = chunk.getPos().getMinBlockX(), z0 = chunk.getPos().getMinBlockZ();
         // Vanilla's river and ocean biomes lay round gravel disks on the bed; in shallow braided rivers they read as gray

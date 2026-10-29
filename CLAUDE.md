@@ -18,7 +18,7 @@ gameplay** and play-tests in the client themselves.
     (`eastFlank`: equatorward coast winds off west coasts at 15-40°, under a 1 km marine layer, stop poleward flows: Baja, Sonora),
     the mass elevation effect (`massElevation`: broad plateaus win back 30% of the lapse cooling: Tibet, the Puna), lake-effect rain. Rates are per cell of a 1024 planet, converted per km (`per()`, `REFERENCE_WIDTH`):
     any new per-cell rate must go through that, or Large planets dry out; check with `tune.sh -R-Dwidth=2048` (a second pass once lakes exist). Checked against the real Köppen map on the Earth planet
-    (`tools/koppen.py`): main groups 57% -> 76% agree, all 30 classes 29% -> 42.5%; tune with `tools/tune.sh -R-D...` (region numbers from `kregion.py`); random planets now 12-15% desert climate (Earth ~14%), and seasons: `amplitude` (half the summer-winter range) and `summerRain` (rain share in the warm half); `warmMean`/`frozenShare` turn them into melt and frost.
+    (`tools/koppen.py`): main groups 57% -> 75% agree, all 30 classes 29% -> 41.5%; tune with `tools/tune.sh -R-D...` (region numbers from `kregion.py`); random planets now 12-15% desert climate (Earth ~14%), and seasons: `amplitude` (half the summer-winter range) and `summerRain` (rain share in the warm half); `warmMean`/`frozenShare` turn them into melt and frost.
   - `Biome`, `Rock`, `Volcano`, `PlanetSettings`.
   - `EarthData`, `Planet.earth()`: the "Earth" planet (`PlanetSettings.earth`, world type "Tectonic Earth"): real elevation, PB2002 plates
     and boundary steps, Natural Earth lakes, from `src/main/resources/realtectonics/earth/` (built by `tools/earthdata.py`, in the
@@ -50,7 +50,8 @@ come from `markLakes`.
 - Every change to how terrain looks goes behind a **format flag**:
   - Bump `PlanetData.FORMAT`, add a line to its comment, and add a `private final boolean x; // ...: format N` field in `Terrain`.
   - Set it as `x = data.format >= N` and gate the new code on it. Old worlds keep their look and get no chunk seams.
-  - Current format: **70**. `docs/FORMATS.md` says what each format added and why (most fix a bug the user saw);
+  - Current format: **64**. Formats 65-71 (rain thinning with height, young rifts, side valleys, ores by province) were
+    tried and reverted with git at the user's request: planets saved at 65-71 no longer load. `docs/FORMATS.md` says what each format added and why (most fix a bug the user saw);
     read its "recurring causes" before fixing an unnatural spot: stamps, on/off thresholds, unstable updates, tile seams.
 - Noise and grid spacings must be **powers of two** (the planet wraps; the seam test fails otherwise).
 - Water must never spill onto lower dry ground. Waterfalls dropping into lower water are fine. Every new water or terrain feature gets a spill check.
@@ -70,7 +71,7 @@ come from `markLakes`.
   (terrain area time and an output hash that must not change in pure speed work). Profile with `jcmd <pid> JFR.start` or the
   `jdk.jfr.Recording` API inside jshell (the jshell JVM is killed, so -XX:StartFlightRecording never dumps).
 - Compile: `./gradlew compileJava -q`. Tests: `./gradlew test -q`. Jar: `./gradlew build -q`.
-- **`Terrain.column(double, double, boolean)` is ~7,890 bytes of bytecode; the JIT never compiles a method over 8,000**
+- **`Terrain.column(double, double, boolean)` is ~7,550 bytes of bytecode; the JIT never compiles a method over 8,000**
   (HotSpot's DontCompileHugeMethods), and the generator would then run interpreted, many times slower. Put new features in
   their own methods; check the size with `javap -c -p` (largest offset) after adding to it.
 - Speed work must keep `relaxhash.jsh` hashes: format 46 `acba683bd8c9b0cb` (`-Dfmt=46`), the file's own format
@@ -86,7 +87,7 @@ come from `markLakes`.
 - **Look at renders before claiming terrain looks right.** `tools/README.md` lists the maintained checks (run them after any
   terrain change), the renderers, and the recipe for the user's "is this natural?" screenshots (player position from
   `nbt.py` → `topmap.jsh` → `uview3d.jsh` → `uprofile.jsh` across the spot). The other ~190 scripts are one-offs.
-- Spill checks must count glacier ice as a wall (`max(ground, water, ice)`). `falls.jsh` baseline is 6 column edges on seed 777 since format 65 (rivers moved with the rain), 4 since format 62 (Earth-like plate sizes: a new planet), 6 since format 52 (braided rivers keep a channel), 12 since the blocking, monsoon-regime, coast-wind and plateau-warmth climate changes (4 and 23 before; rivers move with the rain) (most along river reaches whose banks stand 1-2
+- Spill checks must count glacier ice as a wall (`max(ground, water, ice)`). `falls.jsh` baseline is 4 column edges on seed 777 since format 62 (Earth-like plate sizes: a new planet), 6 since format 52 (braided rivers keep a channel), 12 since the blocking, monsoon-regime, coast-wind and plateau-warmth climate changes (4 and 23 before; rivers move with the rain) (most along river reaches whose banks stand 1-2
   blocks under the water: open, perched banks); `lakeleak.jsh` 0.
 - Dev server, for in-game checks:
   - It runs in `run-server/`, because Sodium and Iris in `run/mods` crash a server.
@@ -96,7 +97,7 @@ come from `markLakes`.
   - Afterwards: `stop`, remove the rcon lines, and `rm -rf run-server/world`.
   - **Never kill the user's client**; only stop processes I started.
 - Dev mods: Distant Horizons and Biomes O' Plenty (with TerraBlender, GlitchCore; pinned by Modrinth version id, since
-  version numbers are shared with the Forge builds) come from `build.gradle` runtimeOnly, and Streams Reflowing (off since format 70: commented out in `build.gradle`; its own streams carved over our terrain, ~21% of
+  version numbers are shared with the Forge builds) come from `build.gradle` runtimeOnly, and Streams Reflowing (off: commented out in `build.gradle`; its own streams carved over our terrain, ~21% of
   generation CPU, about half the generation speed on land; `vanillaWaterFlow=false` in `run*/config/streamsreflowing.properties`, or our rivers' one-block steps spread as sheets). Sodium 0.8.12 and Iris 1.8.14 sit in `run/mods`. Don't add them to both.
 
 ## Style
@@ -109,6 +110,6 @@ come from `markLakes`.
 ## Roadmap
 The user's "cons" list, in their order: 1-4 biome transitions, foothills and folds, scree, ponds (done); 5 decorated
 rivers and oceans (skipped: they'll use other mods); 6 calderas (done); 7 glacier tongues (done, 23); 8 strike-slip
-faults (done, 32; young rifts and stepped rift walls 66-69, taken out again at 70 by the user). 9 ridges and trenches (done, 35; no axial valleys, abyssal hills or outer rise yet). Also done on request: simulated gullies (33), folded strata (34), varied volcanoes and bigger volcanic islands (36), varied beaches and no gully pits (37), lake-effect rain, green riverbanks and ice-free active craters (38).
-10 better plates: supercontinent cycle and ragged continents (39). Flowing-looking glaciers with bare ice and moraines (40). No gully comb on even slopes (41). Volcanoes as eroded as the sim left them, smooth scars, lakes one biome (42). Speed: plain sqrt distances, caves sealed from water only near it (43). From the ideas list: plates and drift saved, /tectonic, map layers and replay (64), rain thins with height (65), young rifts (66, rift walls as benches 69; removed at 70 on request), side valleys (67), ores by province (68). Open: ridge axial valleys, abyssal hills; orographic rain thins with height since format 65 (wettest cells ~4,500 mm on 0.6-2.6 km slopes, Köppen 76.0 / 53.3 / 42.5%).
+faults (done, 32; rift escarpments not done). 9 ridges and trenches (done, 35; no axial valleys, abyssal hills or outer rise yet). Also done on request: simulated gullies (33), folded strata (34), varied volcanoes and bigger volcanic islands (36), varied beaches and no gully pits (37), lake-effect rain, green riverbanks and ice-free active craters (38).
+10 better plates: supercontinent cycle and ragged continents (39). Flowing-looking glaciers with bare ice and moraines (40). No gully comb on even slopes (41). Volcanoes as eroded as the sim left them, smooth scars, lakes one biome (42). Speed: plain sqrt distances, caves sealed from water only near it (43). Open: rift escarpments, ridge axial valleys, abyssal hills; climate's wettest cell reaches ~30,000 mm (orographic rain, unexamined).
 The auto-memory `project-roadmap.md` keeps the user's preferences and their reference worlds.

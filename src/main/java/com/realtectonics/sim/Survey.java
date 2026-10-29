@@ -24,8 +24,6 @@ public final class Survey {
         List<String> out = new ArrayList<>();
         out.add(String.format("%s, %.0f m, %.1f °C, %.0f mm of rain a year", t.biomeAt(x, z), d.metres[g], d.temperature[g], d.precipitation[g]));
         out.add("Rock: " + describe(c.rock()) + (c.volcanic() ? ", fresh volcanic ground" : ""));
-        if (t.geologyOres && !Deposits.of(c.rock()).isEmpty())
-            out.add("Ores in this rock: " + String.join(", ", Deposits.of(c.rock()).stream().map(Deposits.Deposit::ore).distinct().toList()));
         if (d.format < 64) {
             out.add("This world's planet was made before plates were saved (format " + d.format + "): no plate details.");
             return out;
