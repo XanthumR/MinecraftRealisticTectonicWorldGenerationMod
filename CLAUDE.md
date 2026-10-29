@@ -72,7 +72,7 @@ come from `markLakes`.
   (terrain area time and an output hash that must not change in pure speed work). Profile with `jcmd <pid> JFR.start` or the
   `jdk.jfr.Recording` API inside jshell (the jshell JVM is killed, so -XX:StartFlightRecording never dumps).
 - Compile: `./gradlew compileJava -q`. Tests: `./gradlew test -q`. Jar: `./gradlew build -q`.
-- **`Terrain.column(double, double, boolean)` is ~7,910 bytes of bytecode (90 to spare); the JIT never compiles a method over 8,000**
+- **`Terrain.column(double, double, boolean)` is ~7,500 bytes of bytecode (lake shores moved to `lakeShore`, output unchanged); the JIT never compiles a method over 8,000**
   (HotSpot's DontCompileHugeMethods), and the generator would then run interpreted, many times slower. Put new features in
   their own methods; check the size with `javap -c -p` (largest offset) after adding to it.
 - Speed work must keep `relaxhash.jsh` hashes: format 46 `acba683bd8c9b0cb` (`-Dfmt=46`), the file's own format
