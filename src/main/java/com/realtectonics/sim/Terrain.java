@@ -238,6 +238,7 @@ public final class Terrain {
     private final boolean magmaVents;     // patches of magma on active volcanoes, thickest round the crater (magmaPatch): format 58
     public final boolean noiseCaves;      // vanilla's noise caves under the terrain (mod.Caves): format 59
     public final boolean undergroundBiomes; // dripstone under limestone, lush caves under wet climates, the deep dark under old high crust (TectonicBiomeSource): format 60
+    public final boolean openCaves;       // no cave pillars where the cave is open straight up to the sky (mod.Caves): format 72
     private final boolean baseFade;       // the base level fades out away from the river instead of ending where the river search does: format 61
     private final boolean wrappedRims;    // a crater floor finds its rim across the planet's seam too (format 42 used the unwrapped offset): format 62
     private final boolean calderaWalls;   // neighbouring cones' shaping fades across a caldera's edge instead of stopping at it: format 63
@@ -355,6 +356,7 @@ public final class Terrain {
         firn = data.format >= 57;
         magmaVents = data.format >= 58;
         noiseCaves = data.format >= 59;
+        openCaves = data.format >= 72;
         undergroundBiomes = data.format >= 60;
         baseFade = data.format >= 61;
         wrappedRims = data.format >= 62;

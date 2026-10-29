@@ -50,8 +50,9 @@ come from `markLakes`.
 - Every change to how terrain looks goes behind a **format flag**:
   - Bump `PlanetData.FORMAT`, add a line to its comment, and add a `private final boolean x; // ...: format N` field in `Terrain`.
   - Set it as `x = data.format >= N` and gate the new code on it. Old worlds keep their look and get no chunk seams.
-  - Current format: **64**. Formats 65-71 (rain thinning with height, young rifts, side valleys, ores by province) were
-    tried and reverted with git at the user's request: planets saved at 65-71 no longer load. `docs/FORMATS.md` says what each format added and why (most fix a bug the user saw);
+  - Current format: **72** (no cave pillars under the open sky). Formats 65-71 (rain thinning with height, young rifts, side valleys, ores by province) were
+    tried and reverted with git at the user's request: planets saved at 65-71 no longer load (`load()` refuses them);
+    the next format after 72 is 73. `docs/FORMATS.md` says what each format added and why (most fix a bug the user saw);
     read its "recurring causes" before fixing an unnatural spot: stamps, on/off thresholds, unstable updates, tile seams.
 - Noise and grid spacings must be **powers of two** (the planet wraps; the seam test fails otherwise).
 - Water must never spill onto lower dry ground. Waterfalls dropping into lower water are fine. Every new water or terrain feature gets a spill check.

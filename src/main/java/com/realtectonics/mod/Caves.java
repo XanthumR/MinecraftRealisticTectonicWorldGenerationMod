@@ -90,8 +90,8 @@ final class Caves {
                     }
         }
 
-        /** Whether block (lx, y, lz) of the chunk, depth blocks below the ground, is cave. */
-        boolean air(int lx, int y, int lz, int depth) {
+        /** Whether block (lx, y, lz) of the chunk, depth blocks below the ground, is cave; pillars: leave vanilla's stone pillars standing. */
+        boolean air(int lx, int y, int lz, int depth, boolean pillars) {
             int cx = lx / CELL_XZ, cz = lz / CELL_XZ, cy = Math.floorDiv(y - y0, CELL_Y);
             double fx = (lx % CELL_XZ) / (double) CELL_XZ, fz = (lz % CELL_XZ) / (double) CELL_XZ, fy = (y - y0 - cy * CELL_Y) / (double) CELL_Y;
             int i = cx + CORNERS * (cz + CORNERS * cy);
@@ -99,7 +99,8 @@ final class Caves {
             if (sloped < SURFACE_BAND) d = Math.min(sloped, 5 * lerp(entrance, i, fx, fy, fz)); // near the surface only the entrances
             else {
                 double caves = Math.min(lerp(cheesy, i, fx, fy, fz) + Mth.clamp(1.5 - 0.64 * sloped, 0, 0.5), lerp(entrance, i, fx, fy, fz));
-                d = Math.max(Math.min(caves, lerp(tunnels, i, fx, fy, fz)), lerp(pillar, i, fx, fy, fz));
+                d = Math.min(caves, lerp(tunnels, i, fx, fy, fz));
+                if (pillars) d = Math.max(d, lerp(pillar, i, fx, fy, fz));
             }
             return Math.min(d, lerp(noodles, i, fx, fy, fz)) < 0;
         }
