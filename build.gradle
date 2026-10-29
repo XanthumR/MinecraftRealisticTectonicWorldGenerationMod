@@ -18,7 +18,7 @@ dependencies {
     // Faster rendering, and far-off terrain drawn as low-detail LODs: the planet's ranges on the horizon.
     runtimeOnly 'maven.modrinth:distanthorizons:3.3.3-1.21.1'
     // Biomes O' Plenty for dev runs: new worlds pick its realistic biomes (TectonicBiomeSource "biomesoplenty" pack).
-    runtimeOnly 'maven.modrinth:streams-reflowing:vbJ5meb8' // 2.15.2: extra streams carved over our terrain; vanillaWaterFlow=false in its config
+    // runtimeOnly 'maven.modrinth:streams-reflowing:vbJ5meb8' // 2.15.2: extra streams carved over our terrain; vanillaWaterFlow=false in its config. Off: ~a fifth of generation time
     runtimeOnly 'maven.modrinth:biomes-o-plenty:BtZKRp69' // version ids: the version numbers are shared with the Forge builds
     runtimeOnly 'maven.modrinth:terrablender:6e8GCrLb'
     runtimeOnly 'maven.modrinth:glitchcore:S2TfWrZR'

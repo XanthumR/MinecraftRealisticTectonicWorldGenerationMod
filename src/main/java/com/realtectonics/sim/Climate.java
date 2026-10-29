@@ -162,11 +162,11 @@ public final class Climate {
                     if (m >= 0) moisture += Math.min(Math.min(rain, (moisture + rain) * stable * band * rainout) * RECYCLING, RECYCLING_MAX_MM / mmPerUnit) * smoothstep(0, 15, t + swingHere);
                     if (i >= w) {
                         anomaly[g] += share * warmth;
-                        precipitation[g] += share * rain * mmPerUnit;
+                        precipitation[g] += share * rain * aloft(band * rainout, rise, ground) * mmPerUnit;
                         amplitude[g] += share * swingHere;
                         // Dry summers are a west-coast climate: inland the summer heat brings thunderstorms instead.
                         float here = season + (0.5f + CONTINENTAL_SUMMER - season) * land;
-                        summerRain[g] += share * rain * mmPerUnit * here;
+                        summerRain[g] += share * rain * aloft(band * rainout, rise, ground) * mmPerUnit * here;
                     }
                 }
             }
@@ -209,7 +209,7 @@ public final class Climate {
                     felt += rise;
                     float rain = Math.min(moisture, moisture * (band * rainout + Math.max(0, rise) * OROGRAPHIC));
                     moisture -= rain;
-                    if (i >= w) extra[g] += share * rain * mmPerUnit;
+                    if (i >= w) extra[g] += share * rain * aloft(band * rainout, rise, ground) * mmPerUnit;
                 }
             }
         }
@@ -501,7 +501,7 @@ public final class Climate {
                     if (m >= 0) moisture += Math.min(rain * RECYCLING, RECYCLING_MAX_MM / mmPerUnit);
                     if (m >= 0) moisture *= 1 - flowMixing; // over land the stream spreads and mixes away: it waters coasts, not whole continents
                     float season = strength * (1 - smoothstep((float) FLOW_TO - 8, (float) FLOW_TO, abs));
-                    if (m >= 0) wet[g] = season * rain * mmPerUnit;
+                    if (m >= 0) wet[g] = season * rain * aloft(rainout, rise, ground) * mmPerUnit;
                 }
             }
         blurEastWest(wet); // each column was swept alone; the flow is broad
@@ -559,7 +559,7 @@ public final class Climate {
                     if (m >= 0) moisture += Math.min(Math.min(rain, (moisture + rain) * rainout) * RECYCLING, RECYCLING_MAX_MM / mmPerUnit); // and its own summer rain, as under the other winds
                     // Strongest at 10° to MONSOON_REACH less 10: nearer the equator it's rainy all year anyway, farther out the heat low fades.
                     float season = MONSOON * smoothstep(3, 12, abs) * (1 - smoothstep(reach - 10, reach, abs));
-                    if (m >= 0) wet[g] = season * rain * mmPerUnit;
+                    if (m >= 0) wet[g] = season * rain * aloft(rainout, rise, ground) * mmPerUnit;
                 }
             }
         blurEastWest(wet); // each column was swept alone; the monsoon front is broad
@@ -591,6 +591,18 @@ public final class Climate {
     private static float smoothstep(float a, float b, double x) {
         float t = (float) Math.clamp((x - a) / (b - a), 0, 1);
         return t * t * (3 - 2 * t);
+    }
+
+    /**
+     * Of the rain air wrings out over ground this high, the share that falls here. A climb dries the air as before (so rain
+     * shadows stay), but the vapour lies low, thinning with height, so most of what a high climb condenses came from low in
+     * the column and fell on the slopes below: rain peaks on the lower slopes and the highest summits stay dry (Smith and
+     * Barstad). plain is the rain rate without the climb.
+     * ponytail: what falls upslope is dropped, not added to the cells below; their own climb already rains on them
+     */
+    static float aloft(float plain, float rise, float ground) {
+        float lifted = Math.max(0, rise) * OROGRAPHIC, share = lifted / Math.max(1e-12f, plain + lifted);
+        return 1 - share * (1 - (float) Math.exp(-ground / VAPOUR_HEIGHT));
     }
 
     /** Warm air holds more water, 1 at 25 °C. Gentler than Clausius-Clapeyron's 7%/°C, as real rainfall is. */

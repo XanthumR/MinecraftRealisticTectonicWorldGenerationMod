@@ -118,6 +118,13 @@ public final class Terrain {
     static final float SPRING_CHANCE = 0.3f, GEYSER_SHARE = 0.2f, SPRING_FIELD = 0.35f;
     static final double SPRING_MARGIN = 8; // blocks: a spring and its rim stay this far inside its volcano's footprint
     static final double CALDERA_WALL = 128; // blocks inside a collapsed caldera's edge over which neighbouring cones' shaping fades out: format 63
+    static final int RIFT_STEPS = 3;          // fault blocks a rift wall breaks into (format 66)
+    static final float RIFT_RISER = 0.25f;    // share of each block's width its scarp spans: steep faces between broad benches
+    static final float RIFT_JITTER = 0.06f;   // of the floor's drop: the faults wander instead of following its contours exactly
+    static final float RIFT_STEP = 12;        // blocks each fault block drops (180 m), from format 69
+    static final float VALLEY_MIN_FLOW = 0.5f, VALLEY_FULL = 20; // flow (Hydrology.flow) where a side valley starts, and where it is cut in full (format 67)
+    static final float VALLEY_DEPTH = 24, VALLEY_SHARE = 0.3f; // blocks a side valley cuts at most, and as a share of the land's height above the sea
+    static final float VALLEY_SLOPE = 0.6f;   // blocks its walls climb per block out from the line: ~30°, as V-shaped stream valleys stand
     static final float FAN_RAIN = 700, FAN_STEEP = 6, FAN_GENTLE = 4;   // dry mountain fronts: steep reach above, gentle below
     static final float FAN_RADIUS = 90, FAN_SLOPE = 0.12f;           // blocks out from the apex, and fall per block
     static final double FAN_SPREAD = Math.toRadians(75);             // half-angle of the cone
@@ -241,6 +248,10 @@ public final class Terrain {
     private final boolean baseFade;       // the base level fades out away from the river instead of ending where the river search does: format 61
     private final boolean wrappedRims;    // a crater floor finds its rim across the planet's seam too (format 42 used the unwrapped offset): format 62
     private final boolean calderaWalls;   // neighbouring cones' shaping fades across a caldera's edge instead of stopping at it: format 63
+    private final boolean riftScarps;     // a rift's walls step down in fault blocks instead of sloping smoothly: formats 66-69 only
+    private final boolean sideValleys;    // every drainage link too small for a river cuts a V-shaped valley: format 67
+    public final boolean geologyOres;     // ores where the rock's history put them (Deposits), over vanilla's: format 68
+    private final boolean riftBenches;    // rift walls terraced by height, so steps stay benches where erosion softened the wall: format 69
     public final boolean fastMath;        // distances by a plain square root instead of Math.hypot (same to the last bit or two); caves sealed from water only near it: format 43
     private final boolean smoothCones;    // collapse scars of even width, crater floors meet their own rim, peaks fade over lakes, lakes one biome: format 42
     private final int coneStyle;          // Volcano.ROUND, VARIED or SMOOTH_SCARS by format
@@ -359,6 +370,10 @@ public final class Terrain {
         baseFade = data.format >= 61;
         wrappedRims = data.format >= 62;
         calderaWalls = data.format >= 63;
+        riftScarps = data.format >= 66 && data.format < 70; // the user took young rifts out again at 70
+        sideValleys = data.format >= 67;
+        geologyOres = data.format >= 68;
+        riftBenches = data.format >= 69;
         widthMask = (data.w & (data.w - 1)) == 0 ? data.w - 1 : -1;
         coneStyle = smoothCones ? Volcano.SMOOTH_SCARS : variedVolcanoes ? Volcano.VARIED : Volcano.ROUND;
         snowLine = data.format >= 18;
@@ -1026,7 +1041,9 @@ public final class Terrain {
             natural += relief * (2 * ridgeline - (talus ? MASSIF_MEAN : 0.8f)); // from format 19 peaks and valleys around the planet's height, not above it
         }
         if (gullies && !simGullies && natural > SEA_Y + 20) natural += gullies(x, z, u, v, natural - SEA_Y) * (1 - ridgeline * ridgeline * ridgeline); // none on the crests; from 33 water cuts them (relaxTile)
+        if (sideValleys && natural > SEA_Y + 4) natural = sideValleys(u, v, natural);
         if (faults) natural += faultScarp(x, z, u, v, natural);
+        if (riftScarps) natural += riftScarp(x, z, u, v, natural);
         natural = softCeiling(natural);
         // From format 22 volcano summits are sharpened here, as part of the land, so rivers cut through them later
         // instead of being buried by them.
@@ -1066,6 +1083,75 @@ public final class Terrain {
         if (Math.abs(d) > 2) return 0;
         float height = FAULT_SCARP * Math.min(1, slip / Hydrology.FAULT_FULL_SLIP) * Math.clamp(2 * noise(x, z, 512, 43), -1, 1);
         return height * (smoothstep(d + 0.5f) - 0.5f) * smoothstep((natural - SEA_Y) / 8); // none on the beach
+    }
+
+    /**
+     * From format 66: a rift's walls as faults. The simulation drops a rift's floor smoothly (Hydrology.shape), but the
+     * crust breaks along a few normal faults running with the rift, each block dropped further than the one outside it,
+     * so the wall climbs in steps: steep scarps between benches (the Gregory Rift, the Ethiopian escarpment). The drop is
+     * only moved about, never deepened: the floor and the shoulders keep the simulation's heights.
+     */
+    private float riftScarp(double x, double z, double u, double v, float natural) {
+        float down = cubic(data.riftFloor, u, v);
+        if (down <= 0.01f || down >= 0.99f || natural <= SEA_Y) return 0;
+        // From format 69 by height: the wall's smooth height (the planet's, without the hills and gullies on it, so the
+        // faults run along the rift rather than up every gully) is terraced in RIFT_STEP blocks, strongest mid-wall.
+        // Higher ground always stays higher, so it can't raise a crest over a slot. Before, the steps were laid on the floor's
+        // drop as the simulation made it; where erosion had softened the wall since, each bench tilted back into the
+        // wall, leaving knife-edged ribs between slots (the user: "what are these shapes").
+        if (riftBenches) {
+            if (cubic(lakes, u, v) > 0.01f) return 0;
+            float wall = cubic(groundY, u, v) + 3 * noise(x, z, 128, 58), f = wall / RIFT_STEP, k = (float) Math.floor(f);
+            float terraced = RIFT_STEP * (k + smoothstep((f - k - 0.5f) / RIFT_RISER + 0.5f));
+            return 4 * down * (1 - down) * (terraced - wall) * smoothstep((natural - SEA_Y) / 8); // none on the beach
+        }
+        float f = Math.clamp(down + RIFT_JITTER * noise(x, z, 256, 58), 0, 1) * RIFT_STEPS, k = Math.min((float) Math.floor(f), RIFT_STEPS - 1);
+        float stair = (k + smoothstep((f - k - 0.5f) / RIFT_RISER + 0.5f)) / RIFT_STEPS;
+        float before = (natural - SEA_Y) / (1 - Hydrology.RIFT_SINK * down); // roughly the ground before the floor dropped
+        return -Hydrology.RIFT_SINK * before * (stair - down) * smoothstep((natural - SEA_Y) / 8); // none on the beach
+    }
+
+    /**
+     * From format 67: side valleys. Every drainage link of the planet (a cell's flow to its receiver) has a valley along
+     * it, not only those big enough to carry a river: the small streams cut V-shaped valleys into the slopes, deeper the
+     * more ground drains through them, so a range is furrowed by branching valleys instead of rising in smooth sheets.
+     * Each cuts into the land as it stands, by its depth on the line and tapering to nothing depth / VALLEY_SLOPE out,
+     * where valleys meet the deeper one wins; near rivers base level (format 46) keeps them above their water, and none
+     * is cut over a lake.
+     */
+    private float sideValleys(double u, double v, float natural) {
+        if (cubic(lakes, u, v) > 0.01f) return natural;
+        int iu = (int) Math.round(u), iv = (int) Math.round(v);
+        float cut = 0;
+        for (int dy = -2; dy <= 2; dy++)
+            for (int dx = -2; dx <= 2; dx++) {
+                int cy = iv + dy;
+                if (cy < 0 || cy >= h) continue;
+                int c = cell(iu + dx, cy), r = data.receiver[c];
+                float flow = data.flow[c], above = groundY[c] - SEA_Y;
+                if (r < 0 || data.metres[r] < 0 || flow < VALLEY_MIN_FLOW || flow > Hydrology.RIVER_AREA || above < 8) continue; // rivers have valleys of their own
+                float depth = Math.min(VALLEY_DEPTH, VALLEY_SHARE * above) * smoothstep((float) (Math.log(flow / VALLEY_MIN_FLOW) / Math.log(VALLEY_FULL / VALLEY_MIN_FLOW)));
+                float reach = depth / VALLEY_SLOPE;
+                double au = iu + dx, bu = au + wrap(r % w - c % w), bv = r / w, su = bu - au, sv = bv - cy;
+                double t = Math.clamp(((u - au) * su + (v - cy) * sv) / (su * su + sv * sv), 0, 1);
+                if (depth <= cut || hyp(u - au - t * su, v - cy - t * sv) * blocksPerCell > reach + BULGE * blocksPerCell) continue; // can't win
+                // Along the curve the river would take through these cells (as in nearestRiver), so valleys bend, not kink.
+                int up = mainDonor[c], down = data.receiver[r];
+                double pu0 = up < 0 ? 2 * au - bu : au + wrap(up % w - c % w), pv0 = up < 0 ? 2 * cy - bv : up / w;
+                double pu3 = down < 0 ? 2 * bu - au : bu + wrap(down % w - r % w), pv3 = down < 0 ? 2 * bv - cy : down / w;
+                double best = Double.MAX_VALUE, prevU = au, prevV = cy;
+                for (int k = 1; k <= SPLINE_STEPS; k++) {
+                    double s = k / (double) SPLINE_STEPS, qu = catmullD(pu0, au, bu, pu3, s), qv = catmullD(pv0, cy, bv, pv3, s);
+                    double eu = qu - prevU, ev = qv - prevV, len2 = eu * eu + ev * ev;
+                    double f = len2 == 0 ? 0 : Math.clamp(((u - prevU) * eu + (v - prevV) * ev) / len2, 0, 1);
+                    best = Math.min(best, hyp(u - prevU - f * eu, v - prevV - f * ev));
+                    prevU = qu;
+                    prevV = qv;
+                }
+                float off = (float) best * blocksPerCell;
+                if (off < reach) cut = Math.max(cut, (depth - VALLEY_SLOPE * off) * smoothstep(1 - off / reach)); // V, rounded at the rim
+            }
+        return natural - cut;
     }
 
     /** x, z: unzoomed blocks. Large features are laid out in them; fine ones go through fine() and stay in real blocks. */

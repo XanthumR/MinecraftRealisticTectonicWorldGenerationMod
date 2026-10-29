@@ -24,6 +24,10 @@ class TerrainTest {
         assertArrayEquals(data.metres, loaded.metres);
         assertArrayEquals(data.receiver, loaded.receiver);
         assertArrayEquals(data.rock, loaded.rock);
+        assertArrayEquals(data.plate, loaded.plate);
+        assertArrayEquals(data.plateVx, loaded.plateVx);
+        assertArrayEquals(data.riftFloor, loaded.riftFloor);
+        assertEquals(data.drift.size(), loaded.drift.size());
 
         Terrain t = new Terrain(loaded, 7, 1, 1, PlanetSettings.DEFAULT.riverWidth());
         assertTrue(t.column(0, 0).water() == Terrain.Column.NO_WATER, "spawn should be dry land");

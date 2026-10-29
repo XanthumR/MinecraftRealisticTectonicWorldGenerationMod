@@ -58,6 +58,7 @@ public final class Hydrology {
     public final float[] flow;      // rain from upstream, in cells x metres per year
     public final List<Volcano> volcanoes = new ArrayList<>(); // with their bases, as built into this landscape
     public final byte[] ice;        // 0, GLACIATED or FJORD: what the Ice Age glaciers did here
+    public final float[] riftFloor; // 0 to 1 across a rift's floor: how far it has dropped between its faults (shape())
     private final boolean[] lake;
     private final float[] lakeLevel; // lake surface where lake is true: the spill level, or lower in a shrunken lake
     private final float[] sink;      // metres per year a lake evaporates, taken from the flow at its basin's outlet
@@ -137,6 +138,7 @@ public final class Hydrology {
         for (int g = 0; g < n; g++) {
             if (elevation[g] <= 0 || shoulders[g] == 0) continue;
             float down = Math.min(1, 3 * floor[g]), up = Math.max(0, Math.min(1, 4 * shoulders[g]) - down);
+            riftFloor[g] = down;
             float m = Planet.metres(elevation[g]);
             elevation[g] = Planet.fromMetres(Math.max(RIFT_KEEL, m * (1 - RIFT_SINK * down) + RIFT_SHOULDER * up));
         }
@@ -262,6 +264,7 @@ public final class Hydrology {
         lakeLevel = new float[n];
         sink = new float[n];
         ice = new byte[n];
+        riftFloor = new float[n];
     }
 
     /**
