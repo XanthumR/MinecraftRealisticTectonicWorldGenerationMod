@@ -22,7 +22,7 @@ final class Geology {
         int[] trench = planet.trenchDistance(ARC_REACH);
         // Stable continent is granite basement, exposed as shield in eroded uplands, elsewhere buried under
         // flat sedimentary platform. Broad noise picks which, tilted toward shields on higher ground.
-        float[] cover = Noise.fbm(w, h, w / 16, 4, new Random(planet.seed * 17 + 3));
+        float[] cover = Noise.fbm(w, h, planet.scaleWidth / 16, 4, new Random(planet.seed * 17 + 3));
         float[] sorted = cover.clone();
         java.util.Arrays.sort(sorted);
         float shieldAbove = sorted[(int) (sorted.length * (1 - SHIELD_SHARE))];

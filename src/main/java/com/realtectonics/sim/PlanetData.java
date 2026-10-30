@@ -86,7 +86,7 @@ public final class PlanetData {
     /** Runs the whole simulation. Reports progress 0..1; interrupting the thread cancels it between steps. */
     public static PlanetData generate(long seed, PlanetSettings settings, DoubleConsumer progress) {
         Planet planet = settings.earth() ? Planet.earth(settings.width(), settings.height(), seed)
-                : new Planet(settings.width(), settings.height(), settings.plates(), settings.oceanFraction(), settings.volcanoes(), seed);
+                : new Planet(settings.width(), settings.height(), settings.plateCount(), settings.oceanFraction(), settings.volcanoes(), settings.scaleWidth(), seed);
         if (!planet.earth) tectonics(planet, settings.steps(), done -> progress.accept(PLATES_SHARE * done));
         Climate climate = new Climate(planet);
         Hydrology hy = new Hydrology(planet, climate.precipitation, climate.anomaly, climate.amplitude, planet.earth ? EARTH_EROSION : EROSION, seed,

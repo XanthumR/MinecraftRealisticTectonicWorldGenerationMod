@@ -11,6 +11,11 @@ gameplay** and play-tests in the client themselves.
 ## Layout
 - `src/main/java/com/realtectonics/sim`: the simulation. **No Minecraft classes here**, so it runs headless in jshell and tests.
   - `Planet`: plates, collisions, subduction, rifts, hotspots, volcanoes, the supercontinent cycle (`mantleFlow`, `plan`).
+    Plates keep their crust in 64-cell tiles allocated only where they hold any (`Plate.get/set`), so ~250 plates fit on Huge.
+    `scaleWidth` (`PlanetSettings.mediumContinents`, "Continents: Medium-sized"): on Large/Huge the continents, plates, noise
+    and climate rates stay Medium-sized and there are (w/1024)² of each (one supercontinent per Medium's worth, `homes`;
+    pieces drift from their own home, no gathering; the Plates slider counts per Medium, capped at 256 by the byte plate map).
+    Sim only: old planets are saved, so no format bump. `planethash.jsh` must keep normal planets' hashes; `continents.jsh` compares relief.
   - `PlanetData`: the whole run (`generate`), the save file, and `FORMAT`.
   - `Hydrology`: Rho8 routing, stream-power erosion, glaciers, lakes, volcano cones.
   - `Climate`: yearly temperature (6.5 °C/km lapse), currents, rain with moisture recycling over land (capped 800 mm, plain rain only) and
