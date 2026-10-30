@@ -103,7 +103,7 @@ public final class PlanetData {
     /** As above, handing the planet to step after each tectonic step (on this thread), to watch the plates drift. */
     public static PlanetData generate(long seed, PlanetSettings settings, DoubleConsumer progress, Consumer<Planet> step) {
         Planet planet = settings.earth() ? Planet.earth(settings.width(), settings.height(), seed)
-                : new Planet(settings.width(), settings.height(), settings.plates(), settings.oceanFraction(), settings.volcanoes(), seed);
+                : new Planet(settings.width(), settings.height(), settings.plateCount(), settings.oceanFraction(), settings.volcanoes(), settings.scaleWidth(), seed);
         List<Drift> drift = new ArrayList<>();
         if (!planet.earth) {
             int steps = settings.steps();

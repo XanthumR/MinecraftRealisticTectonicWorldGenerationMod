@@ -79,7 +79,8 @@ public final class Climate {
         // The rates above are per cell of a 1024-wide planet; cells of other planets are other sizes, so each is turned
         // into the same rate per kilometre, and a cell's rain is spread over its own width. Otherwise a Large planet's
         // air loses its water twice as fast per km and its continents dry out from the coast (Siberia 69% -> 26%).
-        float s = REFERENCE_WIDTH / w;
+        // A planet of Medium-sized continents is a bigger planet of Medium-sized cells: its rates stay per cell.
+        float s = REFERENCE_WIDTH / planet.scaleWidth;
         evaporation = per(EVAPORATION, s);
         rainout = per(RAINOUT, s);
         seaCoupling = per(SEA_COUPLING, s);

@@ -64,6 +64,7 @@ public final class Planet {
     static final float SHAPE_PULL = 0.7f;         // how strongly the supercontinent's crust gathers round its centre, against the noise
 
     public final int w, h;
+    public final int scaleWidth; // cells round the planet its continents, plates and climate are sized for: w, or 1024 for Medium-sized continents on a bigger planet
     public final Plate[] plates;
     private double[] shares;     // from format 62: the share of the surface each plate slot aims for (plateShares); null on Earth
     public final float[] height; // composited crust thickness per global cell
@@ -83,22 +84,51 @@ public final class Planet {
     private final List<int[]> seamounts = new ArrayList<>(); // {cell, plate, birth step}: hotspot volcanoes riding their plates
     private int stepCount;
     private double centreX, centreY;      // the supercontinent that last broke up, or the meeting point while they gather
+    private double[][] homes;             // with Medium-sized continents: {x, y} of each first supercontinent, which its pieces drift away from; null otherwise
     private boolean gathering;
     private int phaseStart, lastBreakup = Integer.MAX_VALUE; // step the current phase began; step of the planned final breakup
     private final double firstSpread;     // mean distance of continental cells from their centre in the first supercontinent
 
     public static final class Plate {
-        final float[] crust; // plate-local frame, 0 = no crust here
+        static final int TILE = 64; // cells per side of a tile of crust, a power of two; tiles never held stay null, so ~250 plates fit on a Huge planet
+        private final float[][] tiles; // plate-local frame in TILE x TILE tiles; 0 (or a null tile) = no crust here
+        private final int tilesX;
         final boolean[] rowHasCrust; // per local row: false means that whole row is empty, so compositing skips it
         float ox, oy;        // offset of local frame in global cells
         int oxi, oyi;
         float vx, vy;        // cells per step, |v| < 1
 
         Plate(int width, int height, float vx, float vy) {
-            crust = new float[width * height];
+            tilesX = width / TILE;
+            tiles = new float[tilesX * Math.ceilDiv(height, TILE)][];
             rowHasCrust = new boolean[height];
             this.vx = vx;
             this.vy = vy;
+        }
+
+        float get(int lx, int ly) {
+            float[] t = tiles[(ly / TILE) * tilesX + lx / TILE];
+            return t == null ? 0 : t[(ly % TILE) * TILE + lx % TILE];
+        }
+
+        void set(int lx, int ly, float c) {
+            int i = (ly / TILE) * tilesX + lx / TILE;
+            if (tiles[i] == null) {
+                if (c == 0) return;
+                tiles[i] = new float[TILE * TILE];
+            }
+            tiles[i][(ly % TILE) * TILE + lx % TILE] = c;
+        }
+
+        void clearRow(int ly) {
+            for (int tx = 0; tx < tilesX; tx++) {
+                float[] t = tiles[(ly / TILE) * tilesX + tx];
+                if (t != null) Arrays.fill(t, (ly % TILE) * TILE, (ly % TILE + 1) * TILE, 0);
+            }
+        }
+
+        void clear() {
+            Arrays.fill(tiles, null);
         }
     }
 
@@ -112,8 +142,18 @@ public final class Planet {
 
     /** volcanoes: 1 is Earth-like (for a game), 0 none, 2 twice as many arc volcanoes and hotspots. */
     public Planet(int w, int h, int plateCount, float oceanFraction, float volcanoes, long seed) {
+        this(w, h, plateCount, oceanFraction, volcanoes, w, seed);
+    }
+
+    /**
+     * scaleWidth: the width the continents, plates and climate are sized for. Below w, the planet is a bigger one with
+     * Medium-sized continents: (w / scaleWidth)² supercontinents, each its own share of plates, as if that many Medium
+     * planets lay side by side, but one sphere with no seams. Plate motion, arcs and rifts are per cell already.
+     */
+    public Planet(int w, int h, int plateCount, float oceanFraction, float volcanoes, int scaleWidth, long seed) {
         this.w = w;
         this.h = h;
+        this.scaleWidth = scaleWidth;
         volcanism = volcanoes;
         colCos = new double[w];
         colSin = new double[w];
@@ -133,7 +173,7 @@ public final class Planet {
             double angle = rnd.nextDouble() * Math.PI * 2, speed = 0.2 + rnd.nextDouble() * 0.6;
             plates[p] = new Plate(w, h, (float) (Math.cos(angle) * speed), (float) (Math.sin(angle) * speed));
         }
-        for (int g = 0; g < w * h; g++) plates[owner[g]].crust[g] = height[g];
+        for (int g = 0; g < w * h; g++) plates[owner[g]].set(g % w, g / w, height[g]);
         double[] spread = continentSpread();
         firstSpread = spread[2];
         mantleFlow(1 / MANTLE_DRAG); // the breakup has begun: the pieces already move apart at their full pace
@@ -154,10 +194,10 @@ public final class Planet {
      * every scale like real rifts along old weak zones, instead of running as straight lines between seeds.
      */
     private int[] growPlates(int count, Random rnd) {
-        float[] tough = Noise.fbm(w, h, w / 16, 2, rnd, RIFT_ROUGHNESS);
+        float[] tough = Noise.fbm(w, h, scaleWidth / 16, 2, rnd, RIFT_ROUGHNESS);
         int[] own = new int[w * h];
         Arrays.fill(own, -1);
-        double[] growth = new double[count], target = plateShares(count);
+        double[] growth = new double[count], target = plateShares(count, regions());
         shares = target;
         int[] starts = new int[count];
         for (int p = 0; p < count; p++) {
@@ -194,6 +234,21 @@ public final class Planet {
         return own;
     }
 
+    /** Supercontinents on this planet: one, or one per Medium planet's worth of surface. */
+    private int regions() {
+        return (w / scaleWidth) * (w / scaleWidth);
+    }
+
+    /** As below for each of regions Medium planets' worth: each share regions times over, largest first. */
+    static double[] plateShares(int count, int regions) {
+        if (regions == 1) return plateShares(count);
+        double[] one = plateShares(Math.ceilDiv(count, regions)), s = new double[count];
+        double sum = 0;
+        for (int p = 0; p < count; p++) sum += s[p] = one[p / regions];
+        for (int p = 0; p < count; p++) s[p] /= sum;
+        return s;
+    }
+
     /** Share of the surface each of count plates aims for, largest first: Earth's largest count plates, rescaled. */
     public static double[] plateShares(int count) {
         double[] s = new double[count];
@@ -210,21 +265,30 @@ public final class Planet {
     /**
      * The first supercontinent (a Pangaea): all the continental crust gathered in one landmass around a random centre,
      * its outline from rough fractal noise pushed around by two more noise fields, so it has arms, bays, peninsulas
-     * and offshore islands instead of a smooth blob. oceanFraction of the planet starts as ocean.
+     * and offshore islands instead of a smooth blob. oceanFraction of the planet starts as ocean. With Medium-sized
+     * continents there is one such landmass in each Medium planet's worth of the map, each placed as a Medium planet's.
      */
     private float[] continents(float oceanFraction, Random rnd) {
-        float[] n = Noise.fbm(w, h, w / 8, 2, rnd, COAST_ROUGHNESS), wx = Noise.fbm(w, h, w / 8, 8, rnd), wy = Noise.fbm(w, h, w / 8, 8, rnd);
+        int base = scaleWidth / 8;
+        float[] n = Noise.fbm(w, h, base, 2, rnd, COAST_ROUGHNESS), wx = Noise.fbm(w, h, base, 8, rnd), wy = Noise.fbm(w, h, base, 8, rnd);
         float norm = 0, wmean = 0;
-        for (int cell = w / 8; cell >= 2; cell /= 2) norm += (float) Math.pow(COAST_ROUGHNESS, Math.log(w / 8.0 / cell) / Math.log(2));
-        for (int cell = w / 8; cell >= 8; cell /= 2) wmean += 0.5f * (float) Math.pow(0.5, Math.log(w / 8.0 / cell) / Math.log(2));
-        centreX = rnd.nextInt(w);
-        centreY = h * (0.4 + 0.2 * rnd.nextDouble());
-        double land = (1 - oceanFraction) * w * h, a = Math.sqrt(land / (Math.PI * 0.75)), b = Math.min(0.75 * a, 0.4 * h); // a little wider than tall
+        for (int cell = base; cell >= 2; cell /= 2) norm += (float) Math.pow(COAST_ROUGHNESS, Math.log((double) base / cell) / Math.log(2));
+        for (int cell = base; cell >= 8; cell /= 2) wmean += 0.5f * (float) Math.pow(0.5, Math.log((double) base / cell) / Math.log(2));
+        int k = w / scaleWidth, sh = h / k; // regions across and the height of one
+        centreX = rnd.nextInt(scaleWidth);
+        centreY = sh * (0.4 + 0.2 * rnd.nextDouble());
+        if (k > 1) {
+            homes = new double[k * k][];
+            for (int i = 0; i < homes.length; i++)
+                homes[i] = i == 0 ? new double[]{centreX, centreY} : new double[]{i % k * scaleWidth + rnd.nextInt(scaleWidth), i / k * sh + sh * (0.4 + 0.2 * rnd.nextDouble())};
+        }
+        double land = (1 - oceanFraction) * w * h / (k * k), a = Math.sqrt(land / (Math.PI * 0.75)), b = Math.min(0.75 * a, 0.4 * sh); // a little wider than tall
         float[] score = new float[w * h];
         for (int g = 0; g < w * h; g++) {
             int x = g % w, y = g / w;
             int sx = Math.floorMod(Math.round(x + COAST_WARP * (wx[g] - wmean)), w), sy = Math.clamp(Math.round(y + COAST_WARP * (wy[g] - wmean)), 0, h - 1);
             double d = Math.hypot(dx(centreX, x) / a, (y - centreY) / b);
+            if (homes != null) for (double[] c : homes) d = Math.min(d, Math.hypot(dx(c[0], x) / a, (y - c[1]) / b));
             score[g] = n[sx + sy * w] / norm + SHAPE_PULL * (float) (1 - d);
         }
         float[] sorted = score.clone();
@@ -248,6 +312,7 @@ public final class Planet {
     private Planet(int w, int h, long seed, EarthData e) {
         this.w = w;
         this.h = h;
+        scaleWidth = w;
         this.seed = seed;
         earth = true;
         volcanism = 1;
@@ -264,7 +329,7 @@ public final class Planet {
         owner = e.plate.clone();
         plates = new Plate[e.plateCount];
         for (int p = 0; p < plates.length; p++) plates[p] = new Plate(w, h, 0, 0);
-        for (int g = 0; g < w * h; g++) plates[owner[g]].crust[g] = height[g];
+        for (int g = 0; g < w * h; g++) plates[owner[g]].set(g % w, g / w, height[g]);
         markRows();
         subduction = e.subduction;
         collision = e.collision;
@@ -299,19 +364,23 @@ public final class Planet {
      * driven away from its centre; after DISPERSE_STEPS the flow turns and draws them back toward their common centre,
      * closing the young oceans between them (as the Iapetus closed), until they are one again and the next breakup
      * begins. The push scales with the plate's share of continent: ocean plates move by slab pull alone.
+     * With Medium-sized continents (homes) each piece drifts away from its own first supercontinent the whole run.
+     * ponytail: no gathering there, so runs past ~350 steps never close their oceans; gather each home's pieces if wanted.
      */
     private void mantleFlow(double scale) {
-        double[] where = continentSpread();
-        boolean breakup = gathering && (where[2] < GATHERED * firstSpread || stepCount >= lastBreakup);
-        if (breakup || !gathering && stepCount - phaseStart >= DISPERSE_STEPS && lastBreakup - stepCount > DISPERSE_STEPS) { // no time to gather: keep drifting
-            gathering = !breakup;
-            phaseStart = stepCount;
-            if (breakup) lastBreakup = stepCount >= lastBreakup ? Integer.MAX_VALUE : lastBreakup;
-            centreX = where[0];
-            centreY = where[1];
-        } else if (gathering) {
-            centreX = where[0];
-            centreY = h / 2.0; // continents meet at low latitudes, away from the poles
+        if (homes == null) {
+            double[] where = continentSpread();
+            boolean breakup = gathering && (where[2] < GATHERED * firstSpread || stepCount >= lastBreakup);
+            if (breakup || !gathering && stepCount - phaseStart >= DISPERSE_STEPS && lastBreakup - stepCount > DISPERSE_STEPS) { // no time to gather: keep drifting
+                gathering = !breakup;
+                phaseStart = stepCount;
+                if (breakup) lastBreakup = stepCount >= lastBreakup ? Integer.MAX_VALUE : lastBreakup;
+                centreX = where[0];
+                centreY = where[1];
+            } else if (gathering) {
+                centreX = where[0];
+                centreY = h / 2.0; // continents meet at low latitudes, away from the poles
+            }
         }
         int n = plates.length;
         double[] cos = new double[n], sin = new double[n], cy = new double[n];
@@ -328,6 +397,10 @@ public final class Planet {
         for (int p = 0; p < n; p++) {
             if (cont[p] == 0) continue;
             double px = Math.atan2(sin[p], cos[p]) * w / (2 * Math.PI), ddx = dx(centreX, px), ddy = cy[p] / cont[p] - centreY, len = Math.hypot(ddx, ddy);
+            if (homes != null) for (double[] c : homes) { // the nearest home
+                double hx = dx(c[0], px), hy = cy[p] / cont[p] - c[1];
+                if (Math.hypot(hx, hy) < len) { ddx = hx; ddy = hy; len = Math.hypot(hx, hy); }
+            }
             if (len < 1) continue;
             double push = (gathering ? -1 : 1) * MANTLE_FLOW * scale * cont[p] / (double) area[p] / len;
             setVelocity(plates[p], plates[p].vx + ddx * push, plates[p].vy + ddy * push * FLOW_NORTH_SOUTH);
@@ -344,8 +417,12 @@ public final class Planet {
         return m >= 0 ? (float) Math.pow(m / 250, 1 / 1.6) : m / 2700;
     }
 
-    private int local(Plate p, int gx, int gy) {
-        return Math.floorMod(gx - p.oxi, w) + Math.floorMod(gy - p.oyi, h) * w;
+    private float crustAt(Plate p, int gx, int gy) {
+        return p.get(Math.floorMod(gx - p.oxi, w), Math.floorMod(gy - p.oyi, h));
+    }
+
+    private void setCrust(Plate p, int gx, int gy, float c) {
+        p.set(Math.floorMod(gx - p.oxi, w), Math.floorMod(gy - p.oyi, h), c);
     }
 
     public void step() {
@@ -362,8 +439,7 @@ public final class Planet {
                 // ponytail: crust is destroyed/created at the poles; fine while poles are ice caps
                 int gy = noy < p.oyi ? h - 1 : 0;
                 p.oyi = noy;
-                int ly = Math.floorMod(gy - noy, h);
-                Arrays.fill(p.crust, ly * w, ly * w + w, 0);
+                p.clearRow(Math.floorMod(gy - noy, h));
             }
             shiftX[i] = p.oxi - ox0;
             shiftY[i] = p.oyi - oy0;
@@ -391,7 +467,7 @@ public final class Planet {
         Centroids c = centroids();
         slabPull(c);
         mantleFlow(1);
-        recyclePlate(c);
+        for (int i = 0; recyclePlate(c) && ++i < regions(); ) c = centroids(); // one per Medium planet's worth of plates, so each continent rifts as often
         for (int[] s : seamounts) s[1] = owner[s[0]]; // a rift or merger hands them to the plate now under them
         if (++stepCount % HOTSPOT_PERIOD == 0)
             for (int g : hotspots) seamounts.add(new int[]{g, owner[g], stepCount});
@@ -521,8 +597,7 @@ public final class Planet {
     /** Erosion lowered a land cell: the crust under it thins too. */
     void setLandHeight(int g, float crust) {
         height[g] = crust;
-        Plate p = plates[owner[g]];
-        p.crust[local(p, g % w, g / w)] = crust;
+        setCrust(plates[owner[g]], g % w, g / w, crust);
     }
 
     /** Cells inland from an active trench, through the overriding plate, up to maxDist; MAX_VALUE beyond. */
@@ -624,7 +699,7 @@ public final class Planet {
      * Keeps the plate count steady (the Wilson cycle): a plate subducted down to a sliver welds onto
      * the neighbour it touches most, and its slot is reused to rift the largest plate in two.
      */
-    private void recyclePlate(Centroids c) {
+    private boolean recyclePlate(Centroids c) {
         int dead = -1, largest = 0;
         for (int p = 0; p < plates.length; p++) {
             // From format 62 the slot rifts the plate furthest past its share, not simply the largest: halving the
@@ -635,7 +710,7 @@ public final class Planet {
             double min = shares == null ? MIN_PLATE_FRACTION : Math.min(MIN_PLATE_FRACTION, shares[p] / 4);
             if (c.area[p] < w * h * min && (dead < 0 || c.area[p] < c.area[dead])) dead = p;
         }
-        if (dead < 0) return;
+        if (dead < 0) return false;
         Plate d = plates[dead], big = plates[largest];
 
         int[] contact = new int[plates.length];
@@ -649,14 +724,14 @@ public final class Planet {
         for (int p = 1; p < plates.length; p++) if (contact[p] > contact[host]) host = p;
         for (int g = 0; g < w * h; g++) {
             if (owner[g] != dead) continue;
-            plates[host].crust[local(plates[host], g % w, g / w)] = height[g];
+            setCrust(plates[host], g % w, g / w, height[g]);
             owner[g] = host;
         }
-        Arrays.fill(d.crust, 0);
+        d.clear();
 
         // Rift: everything on one side of a wiggly line through the centroid moves to the reused slot.
         double angle = rnd.nextDouble() * Math.PI * 2, nx = Math.cos(angle), ny = Math.sin(angle);
-        double phase = rnd.nextDouble() * Math.PI * 2, scale = w / 1024.0;
+        double phase = rnd.nextDouble() * Math.PI * 2, scale = scaleWidth / 1024.0;
         d.ox = big.ox;
         d.oy = big.oy;
         d.oxi = big.oxi;
@@ -666,13 +741,14 @@ public final class Planet {
             double dx = dx(c.x[largest], g % w), dy = g / w - c.y[largest], along = -dx * ny + dy * nx;
             double wiggle = 16 * scale * (Math.sin(along / (23 * scale) + phase) + 0.5 * Math.sin(along / (9 * scale) + 2 * phase));
             if (dx * nx + dy * ny + wiggle <= 0) continue;
-            int l = local(big, g % w, g / w); // same frame offset, so same local index in d
-            d.crust[l] = big.crust[l];
-            big.crust[l] = 0;
+            int lx = Math.floorMod(g % w - big.oxi, w), ly = Math.floorMod(g / w - big.oyi, h); // same frame offset, so same local cell in d
+            d.set(lx, ly, big.get(lx, ly));
+            big.set(lx, ly, 0);
             owner[g] = dead;
         }
         setVelocity(d, big.vx + nx * RIFT_SPEED, big.vy + ny * RIFT_SPEED);
         setVelocity(big, big.vx - nx * RIFT_SPEED, big.vy - ny * RIFT_SPEED);
+        return true;
     }
 
     /** The cell that subducts at the boundary between neighbours a and b, or -1. Same rule as compositeRow. */
@@ -686,12 +762,12 @@ public final class Planet {
 
     /** Decide who owns each cell and resolve plate boundaries. */
     private void compositeRow(int y, AtomicIntegerArray collisions) {
-        int[] row = new int[plates.length], shift = new int[plates.length]; // local index of x = 0 is row + shift
+        int[] row = new int[plates.length], shift = new int[plates.length]; // local cell of x = 0 is (shift, row)
         int[] active = new int[plates.length]; // plates with any crust in this row, in index order
         int actives = 0;
         for (int p = 0; p < plates.length; p++) {
             int ly = Math.floorMod(y - plates[p].oyi, h);
-            row[p] = ly * w;
+            row[p] = ly;
             shift[p] = Math.floorMod(-plates[p].oxi, w);
             if (plates[p].rowHasCrust[ly]) active[actives++] = p;
         }
@@ -704,7 +780,7 @@ public final class Planet {
             // whole plate subducts along the boundary instead of the plates shredding cell by cell.
             for (int a = 0; a < actives; a++) {
                 int p = active[a];
-                float c = plates[p].crust[row[p] + wrapX(x + shift[p])];
+                float c = plates[p].get(wrapX(x + shift[p]), row[p]);
                 if (c > 0) present[count++] = p;
                 if (c > 0 && (best < 0 || c >= SEA_LEVEL || bestC < SEA_LEVEL)) { bestC = c; best = p; }
             }
@@ -716,10 +792,10 @@ public final class Planet {
                 for (int i = 0; i < count; i++) { // convergent: the loser goes under
                     int p = present[i];
                     if (p == best) continue;
-                    int l = row[p] + wrapX(x + shift[p]);
-                    float c = plates[p].crust[l];
+                    int lx = wrapX(x + shift[p]);
+                    float c = plates[p].get(lx, row[p]);
                     if (c == 0) continue;
-                    plates[p].crust[l] = 0;
+                    plates[p].set(lx, row[p], 0);
                     if (c >= SEA_LEVEL) { // only a continent can win against a continent
                         bestC += c * COLLISION_UPLIFT;
                         colliding = true;
@@ -739,7 +815,7 @@ public final class Planet {
             gap[g] = spreads;
             if (bestC < SEA_LEVEL) bestC = Math.max(OCEAN, bestC - OCEAN_AGING);
             bestC = Math.min(bestC, MAX_CRUST); // ponytail: excess mass just vanishes; spread it sideways if plateaus look too flat
-            plates[best].crust[row[best] + wrapX(x + shift[best])] = bestC;
+            plates[best].set(wrapX(x + shift[best]), row[best], bestC);
             owner[g] = best;
             height[g] = bestC;
         }
@@ -765,8 +841,8 @@ public final class Planet {
                 if (age > oldest || age == oldest && owner[n] < to) { oldest = age; to = owner[n]; }
             }
             if (to == from) continue;
-            plates[from].crust[local(plates[from], x, y)] = 0;
-            plates[to].crust[local(plates[to], x, y)] = height[g];
+            setCrust(plates[from], x, y, 0);
+            setCrust(plates[to], x, y, height[g]);
             owner[g] = to;
         }
     }
@@ -787,7 +863,7 @@ public final class Planet {
                 if (n >= 0 && owner[n] == p && (height[n] > SEA_LEVEL) == land) sum += height[n] - height[g];
             }
             next[g] = height[g] + DIFFUSION * sum;
-            plates[p].crust[local(plates[p], x, y)] = next[g];
+            setCrust(plates[p], x, y, next[g]);
         }
     }
 }

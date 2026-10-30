@@ -92,7 +92,7 @@ public final class Hydrology {
         routeSeed = seed;
         int n = w * h;
         // Roughen the smooth tectonic domes so channels branch instead of running in parallel.
-        float[] noise = Noise.fbm(w, h, w / 64, 4, new Random(seed)); // no 2-cell octave: it shows as an egg-crate grid in game
+        float[] noise = Noise.fbm(w, h, planet.scaleWidth / 64, 4, new Random(seed)); // no 2-cell octave: it shows as an egg-crate grid in game
         for (int g = 0; g < n; g++) {
             float e = planet.height[g] - Planet.SEA_LEVEL;
             elevation[g] = e < 0 ? e : Math.max(0.001f, planet.earth ? e : e + (noise[g] - 0.875f) * (0.3f + 0.15f * e)); // fbm mean is ~0.875; mountains get rougher
@@ -141,7 +141,7 @@ public final class Hydrology {
             elevation[g] = Planet.fromMetres(Math.max(RIFT_KEEL, m * (1 - RIFT_SINK * down) + RIFT_SHOULDER * up));
         }
         int[] offshore = distanceFrom(g -> elevation[g] >= 0), trench = distanceFrom(g -> planet.subduction[g] > Planet.ARC_ACTIVITY);
-        float[] breadth = Noise.fbm(w, h, w / 32, 4, new Random(seed * 13 + 5)), shelf = new float[n];
+        float[] breadth = Noise.fbm(w, h, planet.scaleWidth / 32, 4, new Random(seed * 13 + 5)), shelf = new float[n];
         for (int g = 0; g < n; g++) {
             float width = trench[g] <= ACTIVE_REACH ? ACTIVE_SHELF : SHELF_MIN + (SHELF_MAX - SHELF_MIN) * Math.clamp((breadth[g] - 0.5f) / 0.75f, 0, 1);
             float d = Math.max(offshore[g] - 0.5f, 0); // the shore lies half a cell out from the last land cell

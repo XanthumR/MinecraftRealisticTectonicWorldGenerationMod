@@ -84,7 +84,7 @@ public final class PlanetScreen extends Screen {
         addRenderableWidget(new Slider(cx - 155, y, "Plates", 6, 60, settings.plates(), false, true, v -> settings = settings.withPlates((int) v)));
         addRenderableWidget(new Slider(cx + 5, y, "Ocean", 0.5, 0.85, settings.oceanFraction(), true, true, v -> settings = settings.withOceanFraction((float) v)));
         y += 24;
-        addRenderableWidget(CycleButton.<Integer>builder(w -> Component.literal(w < 1024 ? "Small" : w == 1024 ? "Medium" : w == 2048 ? "Large (slow)" : "Huge (~2 min, 4 GB RAM)"))
+        addRenderableWidget(CycleButton.<Integer>builder(w -> Component.literal(w < 1024 ? "Small" : w == 1024 ? "Medium" : w == 2048 ? "Large (slow)" : "Huge (2-3 min)"))
                 .withValues(Arrays.stream(PlanetSettings.WIDTHS).boxed().toList())
                 .withInitialValue(settings.width())
                 .create(cx - 155, y, 150, 20, Component.literal("Size"), (button, w) -> {
@@ -106,6 +106,14 @@ public final class PlanetScreen extends Screen {
         addRenderableWidget(CycleButton.onOffBuilder(settings.earth()) // Earth: real continents and plates; plates, ocean, volcanoes and steps then do nothing
                 .create(cx - 155, y, 150, 20, Component.literal("Earth"), (button, on) -> {
                     settings = settings.withEarth(on);
+                    restartIn = RESTART_DELAY;
+                }));
+        // On Large and Huge: continents, plates and climate belts sized as on Medium, more of them; Plates then counts per Medium's worth
+        addRenderableWidget(CycleButton.<Boolean>builder(on -> Component.literal(on ? "Medium-sized" : "Grow with size"))
+                .withValues(false, true)
+                .withInitialValue(settings.mediumContinents())
+                .create(cx + 5, y, 150, 20, Component.literal("Continents"), (button, on) -> {
+                    settings = settings.withMediumContinents(on);
                     restartIn = RESTART_DELAY;
                 }));
         y += 24;

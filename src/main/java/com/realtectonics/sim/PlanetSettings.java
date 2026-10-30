@@ -8,58 +8,82 @@ package com.realtectonics.sim;
  * riverWidth: rivers and creeks this many times wider than the simulation's own widths.
  * earth: today's Earth (real continents and plates, Planet.earth) instead of a simulated planet; plates, ocean,
  * volcanoes and steps then do nothing.
+ * mediumContinents: on a planet bigger than Medium, continents, plates and climate stay the size they are on Medium and
+ * there are more of them (plates counts them per Medium planet's worth of surface), instead of the same few grown big.
  */
 public record PlanetSettings(int width, int plates, float oceanFraction, float mountainScale, int zoom, float volcanoes,
-                             int steps, float riverWidth, boolean earth) {
+                             int steps, float riverWidth, boolean earth, boolean mediumContinents) {
     public static final PlanetSettings DEFAULT = new PlanetSettings(1024, 14, 0.7f, 1, 1, 1, 300, 2, false);
+    static final int MEDIUM = 1024; // cells round a Medium planet
+    public static final int MAX_PLATES = 256; // plates are saved as one byte per cell
+
+    public PlanetSettings(int width, int plates, float oceanFraction, float mountainScale, int zoom, float volcanoes, int steps, float riverWidth, boolean earth) {
+        this(width, plates, oceanFraction, mountainScale, zoom, volcanoes, steps, riverWidth, earth, false);
+    }
 
     public PlanetSettings(int width, int plates, float oceanFraction, float mountainScale, int zoom, float volcanoes, int steps, float riverWidth) {
         this(width, plates, oceanFraction, mountainScale, zoom, volcanoes, steps, riverWidth, false);
     }
-    public static final int[] WIDTHS = {512, 1024, 2048, 4096}, ZOOMS = {1, 2, 4}; // Huge: ~100 s and ~3 GB to simulate
+    public static final int[] WIDTHS = {512, 1024, 2048, 4096}, ZOOMS = {1, 2, 4}; // Huge: ~125 s to simulate, ~170 s with Medium-sized continents (224 plates)
 
     public int height() {
         return width / 2;
     }
 
+    /** Cells round the planet its continents, plates and climate are sized for (Planet.scaleWidth). */
+    public int scaleWidth() {
+        return mediumContinents && !earth ? Math.min(width, MEDIUM) : width;
+    }
+
+    /** Plates on the whole planet: the slider's count for each Medium planet's worth of surface. */
+    public int plateCount() {
+        int k = width / scaleWidth();
+        return Math.min(MAX_PLATES, plates * k * k);
+    }
+
     /** Mountain scale, zoom and river width only change how the planet becomes blocks, so they never need a new simulation. */
     public boolean sameSimulation(PlanetSettings o) {
-        return width == o.width && earth == o.earth && (earth || plates == o.plates && oceanFraction == o.oceanFraction && volcanoes == o.volcanoes && steps == o.steps);
+        return width == o.width && earth == o.earth && (earth || plates == o.plates && oceanFraction == o.oceanFraction && volcanoes == o.volcanoes && steps == o.steps
+                && scaleWidth() == o.scaleWidth());
     }
 
     public PlanetSettings withWidth(int v) {
-        return new PlanetSettings(v, plates, oceanFraction, mountainScale, zoom, volcanoes, steps, riverWidth, earth);
+        return new PlanetSettings(v, plates, oceanFraction, mountainScale, zoom, volcanoes, steps, riverWidth, earth, mediumContinents);
     }
 
     public PlanetSettings withPlates(int v) {
-        return new PlanetSettings(width, v, oceanFraction, mountainScale, zoom, volcanoes, steps, riverWidth, earth);
+        return new PlanetSettings(width, v, oceanFraction, mountainScale, zoom, volcanoes, steps, riverWidth, earth, mediumContinents);
     }
 
     public PlanetSettings withOceanFraction(float v) {
-        return new PlanetSettings(width, plates, v, mountainScale, zoom, volcanoes, steps, riverWidth, earth);
+        return new PlanetSettings(width, plates, v, mountainScale, zoom, volcanoes, steps, riverWidth, earth, mediumContinents);
     }
 
     public PlanetSettings withMountainScale(float v) {
-        return new PlanetSettings(width, plates, oceanFraction, v, zoom, volcanoes, steps, riverWidth, earth);
+        return new PlanetSettings(width, plates, oceanFraction, v, zoom, volcanoes, steps, riverWidth, earth, mediumContinents);
     }
 
     public PlanetSettings withZoom(int v) {
-        return new PlanetSettings(width, plates, oceanFraction, mountainScale, v, volcanoes, steps, riverWidth, earth);
+        return new PlanetSettings(width, plates, oceanFraction, mountainScale, v, volcanoes, steps, riverWidth, earth, mediumContinents);
     }
 
     public PlanetSettings withVolcanoes(float v) {
-        return new PlanetSettings(width, plates, oceanFraction, mountainScale, zoom, v, steps, riverWidth, earth);
+        return new PlanetSettings(width, plates, oceanFraction, mountainScale, zoom, v, steps, riverWidth, earth, mediumContinents);
     }
 
     public PlanetSettings withSteps(int v) {
-        return new PlanetSettings(width, plates, oceanFraction, mountainScale, zoom, volcanoes, v, riverWidth, earth);
+        return new PlanetSettings(width, plates, oceanFraction, mountainScale, zoom, volcanoes, v, riverWidth, earth, mediumContinents);
     }
 
     public PlanetSettings withEarth(boolean v) {
-        return new PlanetSettings(width, plates, oceanFraction, mountainScale, zoom, volcanoes, steps, riverWidth, v);
+        return new PlanetSettings(width, plates, oceanFraction, mountainScale, zoom, volcanoes, steps, riverWidth, v, mediumContinents);
+    }
+
+    public PlanetSettings withMediumContinents(boolean v) {
+        return new PlanetSettings(width, plates, oceanFraction, mountainScale, zoom, volcanoes, steps, riverWidth, earth, v);
     }
 
     public PlanetSettings withRiverWidth(float v) {
-        return new PlanetSettings(width, plates, oceanFraction, mountainScale, zoom, volcanoes, steps, v, earth);
+        return new PlanetSettings(width, plates, oceanFraction, mountainScale, zoom, volcanoes, steps, v, earth, mediumContinents);
     }
 }
