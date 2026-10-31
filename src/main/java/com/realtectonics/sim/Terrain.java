@@ -80,6 +80,9 @@ public final class Terrain {
     static final float TALL_HORST = 40;     // format 76: blocks a fault block stands where the crust is stretched the most (600 m); HORST where it is barely
     static final float HORST_HALF = 0.2f, SCARP_BLOCKS = 15; // format 76: share of the fault spacing the flat top spans either side of its middle; unzoomed blocks the stepped scarp beyond it spans
     static final int SCARP_STEPS = 3;       // format 76: faults a block's edge breaks into, each a cliff and a bench
+    static final float TABLE_STEP = 24;     // format 77: default blocks between the hard beds of a tableland, each a bench above a cliff (360 m; 12 read as many small steps); the Cliffs slider sets it
+    static final float TABLE_RISER = 0.06f; // format 77: share of a bed's height the cliff below its bench takes; the bench the rest
+    static final float TABLE_LOW = 40, TABLE_HIGH = 70; // format 77: blocks above the sea where sedimentary land starts to stand as tableland, and fully
     static final float GRABEN_FILL = 2, GRABEN_FILL_MAX = 8; // format 76: blocks under the smoothed land the basin's sediment floor lies; deepest hollow it fills
     static final int SPRING_TILT = 3;     // blocks the ground round a hot spring may rise above its pool
     static final float CRATER_OWN = 4;    // blocks above its volcano's own cone the ground may stand and still be cut by its crater
@@ -196,6 +199,7 @@ public final class Terrain {
     private final float iceCapBelow;   // °C: older planets keep their old ice line
     private final boolean lowlandRivers;  // meanders and deltas: format 7; off on older planets, so their rivers stay put
     private final float riverWidth;
+    private final float tableStep;        // format 77: blocks between tableland benches (PlanetSettings.cliffHeight)
     private final boolean organic;        // curved rivers, creeks, ragged deltas, patchy biomes: format 10
     private final boolean landforms;      // waterfalls, gorges, canyons and the other landforms: format 11
     private final boolean richBiomes;     // rivers, shores, ocean temperatures and mountain zones: format 12
@@ -252,6 +256,8 @@ public final class Terrain {
     private final boolean wetGorges;      // steep rivers on wet limestone and marble uplands cut gorges with wooded, craggy walls: format 74
     private final boolean faultBlocks;    // flat-topped fault blocks behind trenches that roll back (data.backArc): format 75
     private final boolean grabens;        // fault blocks taller where stretched more, stepped scarps, flat basin floors, rock layers lifted with the block: format 76
+    private final boolean tablelands;     // uplifted flat-lying sedimentary rock as benches and cliffs, mesas and buttes: format 77
+    private final float[] sediment;       // format 77: the sedimentary platform (Rock.BASIN) blurred, 0-1 per cell
     private final float[] arcDist;        // format 76: data.backArcDist smoothed more, so faults bend round where the nearest trench changes instead of meeting in a crease
     static final int ARC_DIST_SMOOTHING = 6; // format 76: blur passes over it (cells)
     private final boolean baseFade;       // the base level fades out away from the river instead of ending where the river search does: format 61
@@ -313,7 +319,13 @@ public final class Terrain {
 
     /** riverWidth: rivers, creeks and delta channels this many times wider in blocks. */
     public Terrain(PlanetData data, long seed, float mountainScale, int zoom, float riverWidth) {
+        this(data, seed, mountainScale, zoom, riverWidth, TABLE_STEP);
+    }
+
+    /** cliffHeight: blocks from one tableland bench to the next, the height of each of its cliffs (format 77). */
+    public Terrain(PlanetData data, long seed, float mountainScale, int zoom, float riverWidth, float cliffHeight) {
         this.riverWidth = riverWidth;
+        tableStep = cliffHeight;
         this.data = data;
         this.seed = seed;
         this.zoom = zoom;
@@ -377,6 +389,7 @@ public final class Terrain {
         faultBlocks = data.format >= 75;
         grabens = data.format >= 76;
         arcDist = grabens ? data.backArcDist.clone() : null;
+        tablelands = data.format >= 77;
         for (int pass = 0; grabens && pass < ARC_DIST_SMOOTHING; pass++) blur3x3(arcDist);
         undergroundBiomes = data.format >= 60;
         baseFade = data.format >= 61;
@@ -409,6 +422,9 @@ public final class Terrain {
             silt[g] = data.metres[g] >= 0 && data.receiver[g] >= 0 && data.metres[data.receiver[g]] < 0 ? Math.min(1, data.flow[g] / (8 * Hydrology.RIVER_AREA)) : 0;
         for (int pass = 0; variedShores && pass < 6; pass++) { blur3x3(bay); blur3x3(silt); }
         for (int pass = 0; pass < 2; pass++) blur3x3(lakes);
+        sediment = tablelands ? new float[w * h] : null;
+        for (int g = 0; tablelands && g < w * h; g++) sediment[g] = data.rock[g] == Rock.BASIN.ordinal() ? 1 : 0;
+        for (int pass = 0; tablelands && pass < 3; pass++) blur3x3(sediment);
         rangeY = folds ? new float[w * h] : null;
         foothill = folds ? new float[w * h] : null;
         orogen = folds ? new float[w * h] : null;
@@ -1051,6 +1067,7 @@ public final class Terrain {
         if (gullies && !simGullies && natural > SEA_Y + 20) natural += gullies(x, z, u, v, natural - SEA_Y) * (1 - ridgeline * ridgeline * ridgeline); // none on the crests; from 33 water cuts them (relaxTile)
         if (faults) natural += faultScarp(x, z, u, v, natural);
         if (faultBlocks) natural += grabens ? grabens(x, z, u, v, natural) : faultBlocks(x, z, u, v, natural);
+        if (tablelands) natural = tableland(x, z, u, v, natural, keep[0]);
         natural = softCeiling(natural);
         // From format 22 volcano summits are sharpened here, as part of the land, so rivers cut through them later
         // instead of being buried by them.
@@ -1125,6 +1142,23 @@ public final class Terrain {
         float lift = b[0] * onLand, up = lift * b[1], floor = cubic(rangeY, u, v) - GRABEN_FILL;
         float target = floor + up + GRABEN_FILL * b[1]; // the basin's floor, stepping up to the smoothed land lifted
         return Math.clamp(target - natural, 0.5f * up, 2 * up + GRABEN_FILL_MAX * lift / TALL_HORST);
+    }
+
+    /**
+     * Format 77: tablelands. Uplifted flat-lying sedimentary rock is a layer cake of hard and soft beds: each hard bed
+     * holds up a flat bench and breaks off at its edge in a cliff, so slopes weather into stairs of benches and cliffs
+     * (the Colorado Plateau, the Grand Staircase), a lone hill keeps a flat top inside a cliff (a mesa, a butte), and
+     * canyons step down their walls. Not on rugged ground standing well above the land's smooth height (ridges):
+     * there a narrow crest just past a bed's top was raised a whole step into a spire. The beds dip gently across the
+     * land. Only raises the ground, by at most a step, so it opens no pit, and the rock bands in the cliffs stay level.
+     */
+    private float tableland(double x, double z, double u, double v, float natural, float smooth) {
+        float share = cubic(sediment, u, v) * smoothstep((smooth - SEA_Y - TABLE_LOW) / (TABLE_HIGH - TABLE_LOW));
+        if (share <= 0.01f) return natural;
+        share *= (1 - smoothstep(cubic(lakes, u, v) / 0.3f)) * (1 - smoothstep((natural - smooth - tableStep / 2) / (tableStep / 2)));
+        float dip = SEA_Y + tableStep * fine(x, z, 2048, 81), bed = (natural - dip) / tableStep, k = (float) Math.floor(bed);
+        float stair = dip + (k + smoothstep((bed - k) / TABLE_RISER)) * tableStep;
+        return natural + share * Math.clamp(stair - natural, 0, tableStep);
     }
 
     /** Format 76: blocks the fault block at this column was lifted (0 in a basin); its rock layers go up as far. */

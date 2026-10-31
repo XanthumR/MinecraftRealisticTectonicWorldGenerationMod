@@ -108,6 +108,9 @@ public final class PlanetScreen extends Screen {
                     settings = settings.withEarth(on);
                     restartIn = RESTART_DELAY;
                 }));
+        y += 24;
+        // Tablelands (uplifted flat-lying sedimentary rock) step down in cliffs this many blocks tall, benches between them
+        addRenderableWidget(new Slider(cx - 155, y, "Cliff height", 8, 48, settings.cliffHeight(), false, false, v -> settings = settings.withCliffHeight((int) v)));
         // On Large and Huge: continents, plates and climate belts sized as on Medium, more of them; Plates then counts per Medium's worth
         addRenderableWidget(CycleButton.<Boolean>builder(on -> Component.literal(on ? "Medium-sized" : "Grow with size"))
                 .withValues(false, true)
@@ -127,7 +130,7 @@ public final class PlanetScreen extends Screen {
     }
 
     private int mapWidth() {
-        return Math.max(100, Math.min(width - 40, (height - 24 - 8 - 6 * 24 - 8) * 2));
+        return Math.max(100, Math.min(width - 40, (height - 24 - 8 - 7 * 24 - 8) * 2));
     }
 
     private void simulate() {
@@ -144,7 +147,7 @@ public final class PlanetScreen extends Screen {
                 driftH = planet.h / 2;
                 drift = Drift.of(planet).colors();
             });
-            Terrain terrain = new Terrain(d, s, ps.mountainScale(), ps.zoom(), ps.riverWidth());
+            Terrain terrain = new Terrain(d, s, ps.mountainScale(), ps.zoom(), ps.riverWidth(), ps.cliffHeight());
             int[] rgb = terrain.mapColors(false);
             int spawn = terrain.spawnCell;
             int land = 0;

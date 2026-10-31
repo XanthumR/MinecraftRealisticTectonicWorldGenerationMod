@@ -58,7 +58,8 @@ public final class TectonicChunkGenerator extends NoiseBasedChunkGenerator {
             Codec.intRange(50, 1000).optionalFieldOf("steps", 300).forGetter(PlanetSettings::steps),
             Codec.floatRange(0.25f, 8).optionalFieldOf("river_width", 1f).forGetter(PlanetSettings::riverWidth), // older worlds keep their rivers
             Codec.BOOL.optionalFieldOf("earth", false).forGetter(PlanetSettings::earth),
-            Codec.BOOL.optionalFieldOf("medium_continents", false).forGetter(PlanetSettings::mediumContinents)
+            Codec.BOOL.optionalFieldOf("medium_continents", false).forGetter(PlanetSettings::mediumContinents),
+            Codec.floatRange(4, 64).optionalFieldOf("cliff_height", PlanetSettings.CLIFF_HEIGHT).forGetter(PlanetSettings::cliffHeight)
     ).apply(i, PlanetSettings::new));
 
     public static final MapCodec<TectonicChunkGenerator> CODEC = RecordCodecBuilder.mapCodec(i -> i.group(

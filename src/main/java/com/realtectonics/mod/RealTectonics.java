@@ -111,7 +111,7 @@ public final class RealTectonics {
                 }
                 data.save(file);
             }
-            terrain = new Terrain(data, seed, settings.mountainScale(), settings.zoom(), settings.riverWidth());
+            terrain = new Terrain(data, seed, settings.mountainScale(), settings.zoom(), settings.riverWidth(), settings.cliffHeight());
         } catch (IOException e) {
             throw new UncheckedIOException("Could not load or save " + file, e);
         }

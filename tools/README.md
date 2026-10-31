@@ -20,6 +20,9 @@ one before trusting it.
 | `biomeedge.jsh` | Desert next to snow (0%) |
 | `tune.sh` | Earth climate vs the real Köppen map in one go (`earthclim.jsh` → `koppen.py` → `kregion.py`); pass `-R-D` knobs. `earthclim.jsh -Dseed=N` + `kdry.py` give a random planet's desert shares, `kshares.py` Earth's per region, `climrow.jsh` rain along one latitude, `climtime.jsh` Huge simulation time, `randmap.jsh` a random planet's map and ice share (`-Dwidth`, `-Dmedium=true`); `-R-Dwidth=2048` on `tune.sh` checks planet size doesn't change the climate |
 | `faultblocks.jsh` | Format 75: share of land back-arc extension stretched and the strongest spots in blocks (seed 777: 2.1%, 0.5% over half) |
+| `landforms.jsh` | One example spot of each tectonic landform on a planet (fold, volcano, plateau, trench, arc, ridge, shelf, transform), in blocks and cells (`-Dplanet -Dseed`) |
+| `seafloor.py` | Shaded relief of a planet's cells with the sea drained, like a bathymetry map: `python tools/seafloor.py planet.bin out.png cellX cellY [width] [height]` (`trench` for the deepest sea floor) |
+| `plateaus.py` | High, flat land with steep edges away from volcanoes: `python tools/plateaus.py planet.bin [count]` |
 | `horstspots.jsh` + `annotate.py` | Labels a `uview3d.jsh` render of fault blocks (format 76+): `horstspots.jsh` (same `-Dplanet -Dseed -Dcx -Dcz -Dn`) finds the highest horst and the scarp and graben next to it as image pixels; `python tools/annotate.py in.png out.png "title" spots.txt` draws labelled arrows |
 | `boxspill.jsh` | Water next to lower dry ground in one box (`-Dplanet -Dfmt -Dcx -Dcz -Dn`): spill check for a new feature's own area, run at the old and new format |
 | `wetgorges.jsh` | Format 74: river cells a wet gorge cut over 3 blocks and the deepest spots in blocks, for `uview3d.jsh` (seed 777: 277 cells, deepest 36; 230 dry canyon cells) |
