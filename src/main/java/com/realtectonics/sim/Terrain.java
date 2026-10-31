@@ -82,6 +82,8 @@ public final class Terrain {
     static final int SCARP_STEPS = 3;       // format 76: faults a block's edge breaks into, each a cliff and a bench
     static final float TABLE_STEP = 24;     // format 77: default blocks between the hard beds of a tableland, each a bench above a cliff (360 m; 12 read as many small steps); the Cliffs slider sets it
     static final float TABLE_RISER = 0.06f; // format 77: share of a bed's height the cliff below its bench takes; the bench the rest
+    static final int BASE_REACH = 4; // format 80: cells round a spot on calm rock whose lowest ground is the base level its valleys cut down to
+    static final float CALM_HILLS = 0.6f; // format 80: share of its height a calm plain still rolls with however shallow its valleys, low swells and old worn hills
     static final float TABLE_LOW = 40, TABLE_HIGH = 70; // format 77: blocks above the sea where sedimentary land starts to stand as tableland, and fully
     static final float FJORD_HALF = 0.7f;   // format 78: a fjord's trough this share of a glacial trough's width (narrow water under tall walls)
     static final float FJORD_POWER = 3;     // format 78: its U shape: higher is a flatter floor under steeper walls
@@ -267,6 +269,7 @@ public final class Terrain {
     private final boolean tablelands;     // uplifted flat-lying sedimentary rock as benches and cliffs, mesas and buttes: format 77
     private final float fjordArea;        // format 78: FJORD_AREA, before Hydrology.GLACIER_AREA (fjords themselves come from the planet file)
     private final boolean sunkAtolls;     // atolls only where the land at their volcano is under the sea: format 79
+    private final float[] hillRoom;       // format 80: blocks of height the land's hills and massifs grow from; on calm rock only its height over the lowest ground within BASE_REACH, blurred; null before
     private final float[] fjordRim;       // format 78: per fjord cell, the highest land within a cell of it (the valley's rim), at most FJORD_RIM_MAX over the sea; null before
     private final float[] sediment;       // format 77: the sedimentary platform (Rock.BASIN) blurred, 0-1 per cell
     private final float[] arcDist;        // format 76: data.backArcDist smoothed more, so faults bend round where the nearest trench changes instead of meeting in a crease
@@ -438,6 +441,18 @@ public final class Terrain {
         sediment = tablelands ? new float[w * h] : null;
         for (int g = 0; tablelands && g < w * h; g++) sediment[g] = data.rock[g] == Rock.BASIN.ordinal() ? 1 : 0;
         for (int pass = 0; tablelands && pass < 3; pass++) blur3x3(sediment);
+        // A high plain on an old craton or a sedimentary platform is not rugged for being high: no plates squeeze it, and
+        // rivers can cut it only as deep as the low ground they drain to (the High Plains, the Highveld). Mountain belts,
+        // arcs and volcanic land keep relief that grows with height.
+        hillRoom = data.format >= 80 ? new float[w * h] : null;
+        for (int g = 0; hillRoom != null && g < w * h; g++) { // ponytail: plain 9x9 min, a separable one if world load ever drags
+            float low = groundY[g];
+            for (int dy = -BASE_REACH; dy <= BASE_REACH; dy++)
+                for (int dx = -BASE_REACH; dx <= BASE_REACH; dx++) low = Math.min(low, groundY[cell(g % w + dx, g / w + dy)]);
+            boolean calm = data.rock[g] == Rock.CRATON.ordinal() || data.rock[g] == Rock.BASIN.ordinal();
+            hillRoom[g] = Math.max(groundY[g] - Math.max(SEA_Y, low), CALM_HILLS * (groundY[g] - SEA_Y)) + (calm ? 0 : MAX_Y);
+        }
+        for (int pass = 0; hillRoom != null && pass < 3; pass++) blur3x3(hillRoom); // eases from plain to range over a few cells
         fjordRim = data.format >= 78 ? new float[w * h] : null;
         for (int c = 0; fjordRim != null && c < w * h; c++) {
             if (data.ice[c] != Hydrology.FJORD) continue;
@@ -1068,14 +1083,15 @@ public final class Terrain {
         keep[0] = smooth;
         keep[1] = shore;
         keep[2] = rough;
-        float above = Math.max(0, natural - SEA_Y);
+        float room = hillRoom != null ? cubic(hillRoom, u, v) : Float.MAX_VALUE; // format 80: calm rock roughens only as deep as its valleys are
+        float above = Math.max(0, Math.min(room, natural - SEA_Y));
         natural += rough * (organic ? 5 + 0.06f * above : 3 + 0.05f * above); // mountains are rougher than plains
         if (organic) { // ridged noise: sharp crests and spurs on high ground instead of rounded humps
             float ridge = 1 - Math.abs(fine(x, z, 128, 26)) - 0.5f * Math.abs(fine(x, z, 64, 27));
             natural += ridge * (talus ? Math.min(0.12f * above, RIDGE_CAP) : 0.12f * above) * smoothstep(above / 60);
         }
         if (zoom > 1) { // a zoomed cell spans hills the planet's cells can't hold; none at the shore, so no islets
-            above = Math.max(0, natural - SEA_Y);
+            above = Math.max(0, Math.min(room, natural - SEA_Y));
             natural += (zoom - 1) * HILLS * (noise(x, z, 128, 18) + 0.5f * noise(x, z, 64, 19)) * (1 + 0.02f * above) * smoothstep(above / 12);
         }
         if (landforms && Math.abs(shore) < 0.3f) natural = coast(x, z, u, v, shore, natural);
@@ -1083,9 +1099,9 @@ public final class Terrain {
         // Massifs: a range is many peaks, spurs and deep valleys, not one dome. Ridged relief at the 128-512 block
         // scale, growing with height, so plains stay calm and the highest ranges are cut the deepest.
         float ridgeline = 0;
-        if (massifs && natural > SEA_Y + 20) {
+        if (massifs && Math.min(room, natural - SEA_Y) > 20) {
             ridgeline = ridgeline(x, z);
-            float high = natural - SEA_Y, relief = Math.min(talus ? TALUS_MASSIF_RELIEF : MASSIF_RELIEF, MASSIF_SHARE * high) * smoothstep((high - 20) / 60);
+            float high = Math.min(room, natural - SEA_Y), relief = Math.min(talus ? TALUS_MASSIF_RELIEF : MASSIF_RELIEF, MASSIF_SHARE * high) * smoothstep((high - 20) / 60);
             natural += relief * (2 * ridgeline - (talus ? MASSIF_MEAN : 0.8f)); // from format 19 peaks and valleys around the planet's height, not above it
         }
         if (gullies && !simGullies && natural > SEA_Y + 20) natural += gullies(x, z, u, v, natural - SEA_Y) * (1 - ridgeline * ridgeline * ridgeline); // none on the crests; from 33 water cuts them (relaxTile)
@@ -2059,7 +2075,7 @@ public final class Terrain {
     /** The ground at unzoomed (x, z) before rivers, lakes and landforms: the planet's surface plus its small hills. */
     private float landAt(double x, double z) {
         double u = warpU(x, z), v = warpV(x, z);
-        float natural = cubic(groundY, u, v), above = Math.max(0, natural - SEA_Y);
+        float natural = cubic(groundY, u, v), above = Math.max(0, Math.min(hillRoom != null ? cubic(hillRoom, u, v) : Float.MAX_VALUE, natural - SEA_Y));
         return natural + detail(x, z) * (5 + 0.06f * above);
     }
 
