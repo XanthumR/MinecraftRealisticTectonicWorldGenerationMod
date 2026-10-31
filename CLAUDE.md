@@ -55,9 +55,9 @@ come from `markLakes`.
 - Every change to how terrain looks goes behind a **format flag**:
   - Bump `PlanetData.FORMAT`, add a line to its comment, and add a `private final boolean x; // ...: format N` field in `Terrain`.
   - Set it as `x = data.format >= N` and gate the new code on it. Old worlds keep their look and get no chunk seams.
-  - Current format: **77** (tablelands: benches, cliffs and mesas on uplifted sedimentary rock; 76 horsts and grabens, 75 the first fault blocks). Formats 65-71 (rain thinning with height, young rifts, side valleys, ores by province) were
+  - Current format: **78** (fjords: glacial valleys flooded up to 1000 m; 77 tablelands, 76 horsts and grabens, 75 the first fault blocks). Formats 65-71 (rain thinning with height, young rifts, side valleys, ores by province) were
     tried and reverted with git at the user's request: planets saved at 65-71 no longer load (`load()` refuses them);
-    the next format is 78. `docs/FORMATS.md` says what each format added and why (most fix a bug the user saw);
+    the next format is 79. `docs/FORMATS.md` says what each format added and why (most fix a bug the user saw);
     read its "recurring causes" before fixing an unnatural spot: stamps, on/off thresholds, unstable updates, tile seams.
 - Noise and grid spacings must be **powers of two** (the planet wraps; the seam test fails otherwise).
 - Water must never spill onto lower dry ground. Waterfalls dropping into lower water are fine. Every new water or terrain feature gets a spill check.
@@ -77,7 +77,7 @@ come from `markLakes`.
   (terrain area time and an output hash that must not change in pure speed work). Profile with `jcmd <pid> JFR.start` or the
   `jdk.jfr.Recording` API inside jshell (the jshell JVM is killed, so -XX:StartFlightRecording never dumps).
 - Compile: `./gradlew compileJava -q`. Tests: `./gradlew test -q`. Jar: `./gradlew build -q`.
-- **`Terrain.column(double, double, boolean)` is ~7,600 bytes of bytecode (lake shores moved to `lakeShore`, output unchanged); the JIT never compiles a method over 8,000**
+- **`Terrain.column(double, double, boolean)` is ~7,750 bytes of bytecode (lake shores moved to `lakeShore`, output unchanged); the JIT never compiles a method over 8,000**
   (HotSpot's DontCompileHugeMethods), and the generator would then run interpreted, many times slower. Put new features in
   their own methods; check the size with `javap -c -p` (largest offset) after adding to it.
 - Speed work must keep `relaxhash.jsh` hashes: format 46 `acba683bd8c9b0cb` (`-Dfmt=46`), the file's own format
@@ -117,5 +117,5 @@ come from `markLakes`.
 The user's "cons" list, in their order: 1-4 biome transitions, foothills and folds, scree, ponds (done); 5 decorated
 rivers and oceans (skipped: they'll use other mods); 6 calderas (done); 7 glacier tongues (done, 23); 8 strike-slip
 faults (done, 32; rift escarpments not done). 9 ridges and trenches (done, 35; no axial valleys, abyssal hills or outer rise yet). Also done on request: simulated gullies (33), folded strata (34), varied volcanoes and bigger volcanic islands (36), varied beaches and no gully pits (37), lake-effect rain, green riverbanks and ice-free active craters (38).
-10 better plates: supercontinent cycle and ragged continents (39). Wet-country gorges (74), back-arc fault blocks (75, horst and graben 76; rifts and collapsing old ranges could feed the same field), tablelands (77). Missing tectonic landforms: dome mountains. Flowing-looking glaciers with bare ice and moraines (40). No gully comb on even slopes (41). Volcanoes as eroded as the sim left them, smooth scars, lakes one biome (42). Speed: plain sqrt distances, caves sealed from water only near it (43). Open: rift escarpments, ridge axial valleys, abyssal hills; climate's wettest cell reaches ~30,000 mm (orographic rain, unexamined).
+10 better plates: supercontinent cycle and ragged continents (39). Wet-country gorges (74), back-arc fault blocks (75, horst and graben 76; rifts and collapsing old ranges could feed the same field), tablelands (77), fjords (78). Missing tectonic landforms: dome mountains. Flowing-looking glaciers with bare ice and moraines (40). No gully comb on even slopes (41). Volcanoes as eroded as the sim left them, smooth scars, lakes one biome (42). Speed: plain sqrt distances, caves sealed from water only near it (43). Open: rift escarpments, ridge axial valleys, abyssal hills; climate's wettest cell reaches ~30,000 mm (orographic rain, unexamined).
 The auto-memory `project-roadmap.md` keeps the user's preferences and their reference worlds.

@@ -26,7 +26,7 @@ one before trusting it.
 | `horstspots.jsh` + `annotate.py` | Labels a `uview3d.jsh` render of fault blocks (format 76+): `horstspots.jsh` (same `-Dplanet -Dseed -Dcx -Dcz -Dn`) finds the highest horst and the scarp and graben next to it as image pixels; `python tools/annotate.py in.png out.png "title" spots.txt` draws labelled arrows |
 | `boxspill.jsh` | Water next to lower dry ground in one box (`-Dplanet -Dfmt -Dcx -Dcz -Dn`): spill check for a new feature's own area, run at the old and new format |
 | `wetgorges.jsh` | Format 74: river cells a wet gorge cut over 3 blocks and the deepest spots in blocks, for `uview3d.jsh` (seed 777: 277 cells, deepest 36; 230 dry canyon cells) |
-| `planethash.jsh` | Hash and time of a whole simulated planet (`-Dwidth`, `-Dmedium=true`, `-Dseed`): simulation refactors must keep it (seed 777: 512 `fe906f78ae7d1a91`, 1024 `8adc70945f00ea00`, 2048 `35eb05e1cf9b7a8f`) |
+| `planethash.jsh` | Hash and time of a whole simulated planet (`-Dwidth`, `-Dmedium=true`, `-Dseed`): simulation refactors must keep it (seed 777 since format 78: 512 `efd51d9500bbceca`, 1024 `52a7fc047e865b6b`, 2048 `5b1380f638402131`) |
 | `continents.jsh` | Land share above 500/1000/2000/3000 m, top, rain, volcanoes, and a plate map (`-Dwidth`, `-Dmedium=true`, `-Dseed`): Medium-sized continents should match Medium (>2000 m: Medium seeds 1-6 mean 4.6%, Large medium-continents 5 seeds 5.2%) |
 | `stutter.jsh` | Render-thread stalls while 4 worldgen threads pull new tiles: run with and without `-R-XX:+UseZGC` (G1: 10 frames over 10 ms, max ~20 ms; ZGC: 0, max 6.4 ms) |
 | `baselevel.jsh` | Format 46: share of columns base level raises over an area, and by how much (any planet: `-Dplanet -Dseed -Dzoom -Dcx -Dcz -Dn`) |

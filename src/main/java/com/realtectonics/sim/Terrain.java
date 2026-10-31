@@ -83,6 +83,14 @@ public final class Terrain {
     static final float TABLE_STEP = 24;     // format 77: default blocks between the hard beds of a tableland, each a bench above a cliff (360 m; 12 read as many small steps); the Cliffs slider sets it
     static final float TABLE_RISER = 0.06f; // format 77: share of a bed's height the cliff below its bench takes; the bench the rest
     static final float TABLE_LOW = 40, TABLE_HIGH = 70; // format 77: blocks above the sea where sedimentary land starts to stand as tableland, and fully
+    static final float FJORD_HALF = 0.7f;   // format 78: a fjord's trough this share of a glacial trough's width (narrow water under tall walls)
+    static final float FJORD_POWER = 3;     // format 78: its U shape: higher is a flatter floor under steeper walls
+    static final float FJORD_DEPTH = 24, FJORD_DEPTH_MAX = 44; // format 78: blocks of water over a fjord's floor, more for bigger glaciers (Sognefjord 1,300 m)
+    static final float FJORD_SILL = 5;      // format 78: blocks of water over the rock sill at a fjord's mouth
+    static final float FJORD_WALL = 2;      // format 78: the band a fjord's walls ease back down to the land over, in trough widths from its axis
+    static final float FJORD_RIM_MAX = 80;  // format 78: blocks a fjord's rim stands at most above the sea (1,200 m)
+    static final int FJORD_ICE = 24;        // format 78: a glacier surface lower than this above the sea over a fjord's trough has melted away
+    static final float FJORD_AREA = 5;      // format 78: flow from which a fjord cell gets its trough, so fjords reach up their narrow heads and branches (Hydrology.GLACIER_AREA before)
     static final float GRABEN_FILL = 2, GRABEN_FILL_MAX = 8; // format 76: blocks under the smoothed land the basin's sediment floor lies; deepest hollow it fills
     static final int SPRING_TILT = 3;     // blocks the ground round a hot spring may rise above its pool
     static final float CRATER_OWN = 4;    // blocks above its volcano's own cone the ground may stand and still be cut by its crater
@@ -257,6 +265,8 @@ public final class Terrain {
     private final boolean faultBlocks;    // flat-topped fault blocks behind trenches that roll back (data.backArc): format 75
     private final boolean grabens;        // fault blocks taller where stretched more, stepped scarps, flat basin floors, rock layers lifted with the block: format 76
     private final boolean tablelands;     // uplifted flat-lying sedimentary rock as benches and cliffs, mesas and buttes: format 77
+    private final float fjordArea;        // format 78: FJORD_AREA, before Hydrology.GLACIER_AREA (fjords themselves come from the planet file)
+    private final float[] fjordRim;       // format 78: per fjord cell, the highest land within a cell of it (the valley's rim), at most FJORD_RIM_MAX over the sea; null before
     private final float[] sediment;       // format 77: the sedimentary platform (Rock.BASIN) blurred, 0-1 per cell
     private final float[] arcDist;        // format 76: data.backArcDist smoothed more, so faults bend round where the nearest trench changes instead of meeting in a crease
     static final int ARC_DIST_SMOOTHING = 6; // format 76: blur passes over it (cells)
@@ -390,6 +400,7 @@ public final class Terrain {
         grabens = data.format >= 76;
         arcDist = grabens ? data.backArcDist.clone() : null;
         tablelands = data.format >= 77;
+        fjordArea = data.format >= 78 ? FJORD_AREA : Hydrology.GLACIER_AREA;
         for (int pass = 0; grabens && pass < ARC_DIST_SMOOTHING; pass++) blur3x3(arcDist);
         undergroundBiomes = data.format >= 60;
         baseFade = data.format >= 61;
@@ -425,6 +436,13 @@ public final class Terrain {
         sediment = tablelands ? new float[w * h] : null;
         for (int g = 0; tablelands && g < w * h; g++) sediment[g] = data.rock[g] == Rock.BASIN.ordinal() ? 1 : 0;
         for (int pass = 0; tablelands && pass < 3; pass++) blur3x3(sediment);
+        fjordRim = data.format >= 78 ? new float[w * h] : null;
+        for (int c = 0; fjordRim != null && c < w * h; c++) {
+            if (data.ice[c] != Hydrology.FJORD) continue;
+            float top = groundY[c];
+            for (int dy = -1; dy <= 1; dy++) for (int dx = -1; dx <= 1; dx++) top = Math.max(top, groundY[cell(c % w + dx, c / w + dy)]);
+            fjordRim[c] = Math.min(top, SEA_Y + FJORD_RIM_MAX);
+        }
         rangeY = folds ? new float[w * h] : null;
         foothill = folds ? new float[w * h] : null;
         orogen = folds ? new float[w * h] : null;
@@ -463,7 +481,7 @@ public final class Terrain {
         if (landforms) glacialForms();
         iceNear = new byte[w * h]; // nearestRiver's trough search turns up nothing on most land: skip it there
         for (int c = 0; c < w * h; c++) {
-            if (data.receiver[c] < 0 || data.metres[c] < 0 || data.ice[c] == 0 || data.flow[c] <= Hydrology.GLACIER_AREA) continue;
+            if (data.receiver[c] < 0 || data.metres[c] < 0 || data.ice[c] == 0 || data.flow[c] <= (data.ice[c] == Hydrology.FJORD ? Math.min(fjordArea, Hydrology.GLACIER_AREA) : Hydrology.GLACIER_AREA)) continue;
             for (int dy = -3; dy <= 3; dy++)
                 for (int dx = -3; dx <= 3; dx++) {
                     int y = c / w + dy;
@@ -1311,12 +1329,15 @@ public final class Terrain {
                 if (!iceSheets && valley.ice != Hydrology.FJORD && thick > 1 && (glacierFlow || bilinear(data.precipitation, u, v) >= GLACIER_MIN_RAIN))
                     ice = Math.round(vy + 1 + thick * (1 - 0.5f * t * t)); // a little convex, like a real glacier's surface
             }
-            River fjord = nearestRiver(u, v, Hydrology.FJORD, Hydrology.GLACIER_AREA);
-            float tf = troughFraction(fjord, width);
-            if (tf < 1) {
-                inFjord = true;
-                ground = Math.min(ground, trough(SEA_Y - 2 - Math.min(40, 16 + 0.1f * (float) Math.sqrt(fjord.flow)), ground, tf));
-            }
+        }
+        // From format 78 a fjord's narrow head and branches have their trough too, near a big glacial valley or not
+        River fjord = valley != NO_RIVER || fjordArea < Hydrology.GLACIER_AREA ? nearestRiver(u, v, Hydrology.FJORD, fjordArea) : NO_RIVER;
+        float tf = troughFraction(fjord, (1 + 0.3f * noise(x, z, 256, 10)) * (fjordRim != null ? FJORD_HALF * FJORD_WALL : 1));
+        if (tf < 1) {
+            inFjord = fjordRim == null || tf * FJORD_WALL < 1;
+            if (fjordRim != null) ground = fjordCut(fjord, ground, tf * FJORD_WALL);
+            else ground = Math.min(ground, trough(SEA_Y - 2 - Math.min(40, 16 + 0.1f * (float) Math.sqrt(fjord.flow)), ground, tf));
+            if (fjordArea < Hydrology.GLACIER_AREA && ice != Column.NO_WATER && ice < SEA_Y + FJORD_ICE) ice = Column.NO_WATER; // from 78 the sea took the trough: no ice hanging over it
         }
         float bank = 8 + 2 * river.half, drop = river.top - river.bottom;
         boolean gorge = false, canyon = false, wetGorge = false;
@@ -2149,6 +2170,24 @@ public final class Terrain {
     }
 
     /** U-shaped cross-section: flat floor, walls steepening up to the untouched ground at t = 1. */
+    /**
+     * Format 78: a fjord's cross-section, t 0 on its axis to 1 at its rim. A real fjord is narrow and deep, a flat
+     * floor between walls that rise straight out of the water (Geirangerfjord: 1.5 km wide under 1,600 m walls), so
+     * the trough is a steep U (t^FJORD_POWER) narrower than a glacial trough on land. Toward its mouth the floor rises
+     * to a rock sill a few blocks under the water (Sognefjord: 100 m over 1,300 inside), where the glacier ended.
+     */
+    private int fjordCut(River fjord, int ground, float t) {
+        float floor = SEA_Y - 2 - Math.min(FJORD_DEPTH_MAX, FJORD_DEPTH + 0.15f * (float) Math.sqrt(fjord.flow));
+        if (fjord.cell >= 0 && data.receiver[fjord.cell] >= 0 && data.metres[data.receiver[fjord.cell]] < 0) // the last reach before the open sea
+            floor = Math.max(floor, SEA_Y - FJORD_SILL - (SEA_Y - FJORD_SILL - floor) * (1 - smoothstep((fjord.t - 0.4f) / 0.4f)));
+        // The walls stand up to the valley's rim, the high land either side: on 32-block cells a fjord's valley is
+        // narrower than a cell, and the land between its axis and the rim was only a smoothed ramp. Past the trough
+        // the wall eases back down onto the land over the rest of the band, so it only ever raises the land there.
+        float rim = Math.max(ground, fjordRim[fjord.cell] + fjord.t * (fjordRim[Math.max(0, data.receiver[fjord.cell])] - fjordRim[fjord.cell]));
+        if (t >= 1) return Math.round(Math.max(ground, rim + (ground - rim) * smoothstep((t - 1) / (FJORD_WALL - 1))));
+        return Math.round(floor + (rim - floor) * (float) Math.pow(t, FJORD_POWER));
+    }
+
     private static int trough(float floor, int ground, float t) {
         return Math.round(floor + (ground - floor) * t * t);
     }

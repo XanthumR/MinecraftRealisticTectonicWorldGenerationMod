@@ -46,7 +46,11 @@ public final class Hydrology {
     static final float ICE_REACH = 3;           // °C: glacier tongues flow down into this much warmth before melting
     static final float ICE_MIN_RAIN = 250;      // mm: drier land stayed bare, as Siberia and interior Alaska did
     static final float GLACIAL_EROSION = 3;     // glaciers deepen valleys this many times faster than rivers
-    static final float FJORD_METRES = 15;       // a glacial valley this close to sea level floods into a fjord
+    // From format 78: the Ice Age glaciers dug their troughs far below sea level near the coast (Sognefjord 1,300 m),
+    // where the ice was thickest, and the sea flooded them when it melted. Erosion here stops at sea level, as rivers
+    // do, so a glacial valley among mountains whose floor ends up this low, from the sea inward, stands for one (400 m left round bays at the coast). Before
+    // it was 15 m: hardly any valley ended that low, and a planet had a few fjord cells, none in Norway on Earth.
+    static final float FJORD_METRES = 1000;
     static final float FJORD_RELIEF = 350;      // metres within 3 cells: only valleys among mountains are fjords; lowland ones stay rivers
     public static final float GLACIER_AREA = 20; // flow that gathers enough ice to carve its own trough
     public static final byte GLACIATED = 1, FJORD = 2;
