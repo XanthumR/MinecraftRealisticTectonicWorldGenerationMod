@@ -22,7 +22,7 @@ public final class PlanetData {
     public static final double PLATES_SHARE = 0.6; // of the progress bar: plates take ~60% of the time, rivers the rest
     static final int ERODE_EVERY = 10;      // tectonic steps between erosion passes while the plates move
     static final float TECTONIC_EROSION = 1; // times Hydrology.ERODIBILITY; stronger flattens the continents and drains their lakes
-    private static final int FORMAT = 74; // 2 volcanoes, 3 rock provinces, 4 volcano bases, 5 glaciers, 6 shelves, 7 deltas, 8 currents, 9 compact shields, 10 curved rivers, 11 landforms, 12 rich biomes, 13 forest variety, 14 gullies, 15 massifs, 16 wild rivers, 17 foothills and folds, 18 climate snow line, 19 talus, 20 perched banks, 21 calderas and cinder cones, 22 simulated calderas, 23 flowing glaciers (no new data), 24 seasons (amplitude, summerRain), 25 gentle lake shores, 26 craters only on their own volcano, 27 smooth glacier ice, 28 blended troughs and lake sills, 29 block-scale rockfall, 30 lakes leave high land standing, stable rockfall, no peaks over calderas or lakes, 31 lake shores ramp up to high land, 32 strike-slip faults (faultSide, faultSlip), 33 gullies cut by water at block scale, 34 folded strata, 35 ridges and trenches (abyss squeezed), 36 varied volcanoes, 37 varied beaches and no gully pits, 38 lake-effect rain, green riverbanks, ice-free active craters, 39 supercontinent cycle (sim only), 40 flowing ice, 41 runoff spreads over even slopes, 42 smooth collapse scars and crater floors, lakes one biome, 43 faster distances, 44 badlands only on high sedimentary rock, 45 snow, lake ice and snowy taiga only where frozen two-thirds of the year, 46 base level: relief never digs below rivers, 47 no gravel on top, 48 open river mouths, 49 no deltas, 50 river channels open into the sea, 51 oxbows only on floodplains, 52 braided rivers keep a channel down the middle, 53 biome ground where gravel was, 54 still one-block river steps, 55 glacier ice follows the slope, 56 over the blurred rock, 57 snow and firn on glaciers above the snow line, 58 magma patches on active volcanoes, 59 noise caves, 60 cave biomes, 61 base level fades from rivers, 62 plate sizes as Earth's (sim only), 63 cones fade across caldera walls, 64 plates, their motion and the drift recording saved (no terrain change), 65-71 reverted (refused), 72 no cave pillars under the open sky, 73 lake outlets open into their rivers, 74 gorges on wet limestone and marble uplands; older files load without them
+    private static final int FORMAT = 75; // 2 volcanoes, 3 rock provinces, 4 volcano bases, 5 glaciers, 6 shelves, 7 deltas, 8 currents, 9 compact shields, 10 curved rivers, 11 landforms, 12 rich biomes, 13 forest variety, 14 gullies, 15 massifs, 16 wild rivers, 17 foothills and folds, 18 climate snow line, 19 talus, 20 perched banks, 21 calderas and cinder cones, 22 simulated calderas, 23 flowing glaciers (no new data), 24 seasons (amplitude, summerRain), 25 gentle lake shores, 26 craters only on their own volcano, 27 smooth glacier ice, 28 blended troughs and lake sills, 29 block-scale rockfall, 30 lakes leave high land standing, stable rockfall, no peaks over calderas or lakes, 31 lake shores ramp up to high land, 32 strike-slip faults (faultSide, faultSlip), 33 gullies cut by water at block scale, 34 folded strata, 35 ridges and trenches (abyss squeezed), 36 varied volcanoes, 37 varied beaches and no gully pits, 38 lake-effect rain, green riverbanks, ice-free active craters, 39 supercontinent cycle (sim only), 40 flowing ice, 41 runoff spreads over even slopes, 42 smooth collapse scars and crater floors, lakes one biome, 43 faster distances, 44 badlands only on high sedimentary rock, 45 snow, lake ice and snowy taiga only where frozen two-thirds of the year, 46 base level: relief never digs below rivers, 47 no gravel on top, 48 open river mouths, 49 no deltas, 50 river channels open into the sea, 51 oxbows only on floodplains, 52 braided rivers keep a channel down the middle, 53 biome ground where gravel was, 54 still one-block river steps, 55 glacier ice follows the slope, 56 over the blurred rock, 57 snow and firn on glaciers above the snow line, 58 magma patches on active volcanoes, 59 noise caves, 60 cave biomes, 61 base level fades from rivers, 62 plate sizes as Earth's (sim only), 63 cones fade across caldera walls, 64 plates, their motion and the drift recording saved (no terrain change), 65-71 reverted (refused), 72 no cave pillars under the open sky, 73 lake outlets open into their rivers, 74 gorges on wet limestone and marble uplands, 75 fault blocks behind trenches that roll back (backArc, backArcDist); older files load without them
 
     public final int w, h;
     public final float[] metres;        // ground, relative to sea level
@@ -41,6 +41,8 @@ public final class PlanetData {
     public final byte[] plate;          // plate under each cell at the end of the run, unsigned (format 64)
     public float[] plateVx = new float[0], plateVy = new float[0]; // each plate's motion, cells per step (format 64; 0 on Earth)
     public final List<Drift> drift = new ArrayList<>(); // the plates over the run, Drift.FRAMES of them (format 64; none on Earth)
+    public final float[] backArc;       // 0-1, how far back-arc extension stretched the crust, Planet.backArc (format 75; 0 before)
+    public final float[] backArcDist;   // cells to the nearest active trench behind which it was stretched (format 75)
     public int format = FORMAT;         // of the file this planet came from: older planets keep their old block heights
 
     private PlanetData(int w, int h) {
@@ -60,6 +62,8 @@ public final class PlanetData {
         faultSide = new float[w * h];
         faultSlip = new float[w * h];
         plate = new byte[w * h];
+        backArc = new float[w * h];
+        backArcDist = new float[w * h];
     }
 
     public static PlanetData from(Planet planet, Climate climate, Hydrology hy) {
@@ -86,6 +90,9 @@ public final class PlanetData {
         System.arraycopy(faults[0], 0, d.faultSide, 0, d.faultSide.length);
         System.arraycopy(faults[1], 0, d.faultSlip, 0, d.faultSlip.length);
         for (int g = 0; g < d.plate.length; g++) d.plate[g] = (byte) planet.owner[g];
+        float[][] stretched = planet.backArc();
+        System.arraycopy(stretched[0], 0, d.backArc, 0, d.backArc.length);
+        System.arraycopy(stretched[1], 0, d.backArcDist, 0, d.backArcDist.length);
         d.plateVx = new float[planet.plates.length];
         d.plateVy = new float[planet.plates.length];
         for (int p = 0; p < planet.plates.length; p++) {
@@ -175,6 +182,8 @@ public final class PlanetData {
                 out.write(f.ground());
                 out.write(f.plate());
             }
+            for (float v : backArc) out.writeFloat(v);
+            for (float v : backArcDist) out.writeFloat(v);
         }
     }
 
@@ -220,6 +229,10 @@ public final class PlanetData {
                     in.readFully(plate);
                     d.drift.add(new Drift(fw, fh, ground, plate));
                 }
+            }
+            if (format >= 75) {
+                for (int i = 0; i < d.backArc.length; i++) d.backArc[i] = in.readFloat();
+                for (int i = 0; i < d.backArcDist.length; i++) d.backArcDist[i] = in.readFloat();
             }
             return d;
         }

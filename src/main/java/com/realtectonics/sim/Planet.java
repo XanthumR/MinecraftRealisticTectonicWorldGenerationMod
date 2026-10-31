@@ -43,6 +43,8 @@ public final class Planet {
     static final int FAULT_WINDOW = 3;            // cells around a boundary cell that give the boundary its direction
     static final int FAULT_REACH = 4;             // cells either side of a strike-slip boundary its distance field reaches; past it, the field stops signing sides
     static final float FAULT_MIN_SLIP = 0.05f;    // cells per step of sliding that make a boundary a fault worth showing
+    static final int BACKARC_FROM = ARC_MAX, BACKARC_TO = 16; // cells behind a trench where back-arc extension stretches the crust (the Aegean: ~150-600 km)
+    static final float BACKARC_HOLD = 0.05f, BACKARC_RANGE = 0.25f; // cells per step: an overriding plate advancing on its trench faster than HOLD is squeezed, not stretched; fully stretched once it pulls away at RANGE - HOLD
     // The supercontinent cycle (Wilson 1966; Nance et al. 1988): one continent insulates the mantle beneath it, the
     // heat lifts and tears it apart, the pieces drift off, and in time the oceans between them close again.
     static final float MANTLE_FLOW = 0.06f;       // per step, on a plate that is all continent: terminal ~1.2 cells/step against MANTLE_DRAG, capped at MAX_SPEED
@@ -592,6 +594,39 @@ public final class Planet {
         Geology.blur(side, w, h);
         for (int pass = 0; pass < 2; pass++) Geology.blur(rate, w, h);
         return new float[][]{side, rate};
+    }
+
+    /**
+     * Back-arc extension (format 75). Behind an active trench the overriding plate is squeezed where it advances on the
+     * trench (the Andes), but where it holds back or pulls away, the sinking slab rolls back and the crust behind the arc
+     * is stretched and breaks into fault blocks (the Aegean, the Sea of Japan). [0]: how stretched, 0-1, on land
+     * BACKARC_FROM to BACKARC_TO cells behind the trench; [1]: straight distance in cells to the nearest trench cell, so
+     * the faults can run along the trench. Both blurred. ponytail: none on Earth (its plates hold still); continental rifts
+     * and collapsing old ranges (the Basin and Range) stretch too, and could feed the same field.
+     */
+    public float[][] backArc() {
+        float[] stretch = new float[w * h], dist = new float[w * h];
+        if (earth) return new float[][]{stretch, dist};
+        int[] steps = new int[w * h], source = new int[w * h], queue = new int[w * h];
+        Arrays.fill(steps, Integer.MAX_VALUE);
+        int n = 0;
+        for (int g = 0; g < w * h; g++) if (subduction[g] > ARC_ACTIVITY) { steps[g] = 0; source[g] = g; queue[n++] = g; }
+        for (int i = 0; i < n; i++) { // inland through the overriding plate, remembering the trench cell each came from
+            int c = queue[i], x = c % w, y = c / w;
+            float tx = (float) dx(x, source[c] % w), ty = source[c] / w - y, len = (float) Math.hypot(tx, ty);
+            dist[c] = len;
+            if (len > 0 && height[c] >= SEA_LEVEL) {
+                Plate p = plates[owner[c]];
+                float advance = (p.vx * tx + p.vy * ty) / len; // toward the trench
+                float zone = Math.clamp((len - BACKARC_FROM) / 2, 0, 1) * Math.clamp((BACKARC_TO - len) / 4, 0, 1);
+                stretch[c] = zone * Math.clamp((BACKARC_HOLD - advance) / BACKARC_RANGE, 0, 1);
+            }
+            if (steps[c] == BACKARC_TO + 2) continue;
+            for (int nb : new int[]{Math.floorMod(x - 1, w) + y * w, (x + 1) % w + y * w, y > 0 ? c - w : -1, y < h - 1 ? c + w : -1})
+                if (nb >= 0 && steps[nb] == Integer.MAX_VALUE && owner[nb] == owner[c]) { steps[nb] = steps[c] + 1; source[nb] = source[c]; queue[n++] = nb; }
+        }
+        for (int pass = 0; pass < 2; pass++) { Geology.blur(stretch, w, h); Geology.blur(dist, w, h); }
+        return new float[][]{stretch, dist};
     }
 
     /** Erosion lowered a land cell: the crust under it thins too. */

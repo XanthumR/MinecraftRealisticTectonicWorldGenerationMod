@@ -75,6 +75,8 @@ public final class Terrain {
     static final float LAKE_CUT_MAX = 48;    // blocks above its surface beyond which a lake leaves the land standing (format 30)
     static final float ICE_FRONT = 4;        // blocks: height of a glacier's calving front above a lake (format 31)
     static final float FAULT_SCARP = 10, FAULT_SCARP_WIDTH = 2; // blocks a fast fault's scarp stands (150 m, a pressure ridge); unzoomed blocks its face spans
+    static final float HORST = 16;          // format 75: blocks a fault block of fully stretched crust stands over the basins beside it (240 m)
+    static final float HORST_SPACING = 192; // format 75: unzoomed blocks from one fault block to the next across the trench's strike
     static final int SPRING_TILT = 3;     // blocks the ground round a hot spring may rise above its pool
     static final float CRATER_OWN = 4;    // blocks above its volcano's own cone the ground may stand and still be cut by its crater
     static final float ICE_EDGE = 12;     // blocks below the land the ice surface sinks at cells without ice, so glaciers thin to their edges
@@ -244,6 +246,7 @@ public final class Terrain {
     public final boolean openCaves;       // no cave pillars where the cave is open straight up to the sky (mod.Caves): format 72
     private final boolean lakeOutlets;    // a lake's shore ring leaves the channel of a lower river leaving it open: format 73
     private final boolean wetGorges;      // steep rivers on wet limestone and marble uplands cut gorges with wooded, craggy walls: format 74
+    private final boolean faultBlocks;    // flat-topped fault blocks behind trenches that roll back (data.backArc): format 75
     private final boolean baseFade;       // the base level fades out away from the river instead of ending where the river search does: format 61
     private final boolean wrappedRims;    // a crater floor finds its rim across the planet's seam too (format 42 used the unwrapped offset): format 62
     private final boolean calderaWalls;   // neighbouring cones' shaping fades across a caldera's edge instead of stopping at it: format 63
@@ -364,6 +367,7 @@ public final class Terrain {
         openCaves = data.format >= 72;
         lakeOutlets = data.format >= 73;
         wetGorges = data.format >= 74;
+        faultBlocks = data.format >= 75;
         undergroundBiomes = data.format >= 60;
         baseFade = data.format >= 61;
         wrappedRims = data.format >= 62;
@@ -1036,6 +1040,7 @@ public final class Terrain {
         }
         if (gullies && !simGullies && natural > SEA_Y + 20) natural += gullies(x, z, u, v, natural - SEA_Y) * (1 - ridgeline * ridgeline * ridgeline); // none on the crests; from 33 water cuts them (relaxTile)
         if (faults) natural += faultScarp(x, z, u, v, natural);
+        if (faultBlocks) natural += faultBlocks(x, z, u, v, natural);
         natural = softCeiling(natural);
         // From format 22 volcano summits are sharpened here, as part of the land, so rivers cut through them later
         // instead of being buried by them.
@@ -1075,6 +1080,25 @@ public final class Terrain {
         if (Math.abs(d) > 2) return 0;
         float height = FAULT_SCARP * Math.min(1, slip / Hydrology.FAULT_FULL_SLIP) * Math.clamp(2 * noise(x, z, 512, 43), -1, 1);
         return height * (smoothstep(d + 0.5f) - 0.5f) * smoothstep((natural - SEA_Y) / 8); // none on the beach
+    }
+
+    /**
+     * Format 75: where back-arc extension stretched the crust, normal faults running along the trench break it into
+     * blocks; every other one stands raised with steep scarps, its top the old land surface lifted flat (a horst), the
+     * low ground between left as the basin (a graben): the Aegean's plateaus and plains. The top is the smoothed land
+     * lifted (rangeY), so dells on it fill and only hills poke through, but never less than half the lift over the land
+     * there. The faults wander and die out along their length. Only raises the ground, so it opens no pit to hold or
+     * spill water; a river keeps its own channel and saws a gorge through the block.
+     */
+    private float faultBlocks(double x, double z, double u, double v, float natural) {
+        float stretch = cubic(data.backArc, u, v);
+        if (stretch < 0.02f || natural < SEA_Y + 2) return 0;
+        double phase = cubic(data.backArcDist, u, v) * BLOCKS_PER_CELL / HORST_SPACING + 0.25 * fine(x, z, 512, 79);
+        float t = (float) Math.cos(2 * Math.PI * phase), along = smoothstep((fine(x, z, 512, 80) + 0.35f) / 0.5f);
+        float onLand = smoothstep((natural - SEA_Y - 2) / 8) * (1 - smoothstep(cubic(lakes, u, v) / 0.3f));
+        float lift = HORST * Math.min(1, 2 * stretch) * along * onLand;
+        float top = Math.max(natural + 0.5f * lift, cubic(rangeY, u, v) + lift);
+        return Math.min(top - natural, 2.5f * lift) * smoothstep((t - 0.1f) / 0.25f);
     }
 
     /**
