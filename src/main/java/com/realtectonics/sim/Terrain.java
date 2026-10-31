@@ -266,6 +266,7 @@ public final class Terrain {
     private final boolean grabens;        // fault blocks taller where stretched more, stepped scarps, flat basin floors, rock layers lifted with the block: format 76
     private final boolean tablelands;     // uplifted flat-lying sedimentary rock as benches and cliffs, mesas and buttes: format 77
     private final float fjordArea;        // format 78: FJORD_AREA, before Hydrology.GLACIER_AREA (fjords themselves come from the planet file)
+    private final boolean sunkAtolls;     // atolls only where the land at their volcano is under the sea: format 79
     private final float[] fjordRim;       // format 78: per fjord cell, the highest land within a cell of it (the valley's rim), at most FJORD_RIM_MAX over the sea; null before
     private final float[] sediment;       // format 77: the sedimentary platform (Rock.BASIN) blurred, 0-1 per cell
     private final float[] arcDist;        // format 76: data.backArcDist smoothed more, so faults bend round where the nearest trench changes instead of meeting in a crease
@@ -401,6 +402,7 @@ public final class Terrain {
         arcDist = grabens ? data.backArcDist.clone() : null;
         tablelands = data.format >= 77;
         fjordArea = data.format >= 78 ? FJORD_AREA : Hydrology.GLACIER_AREA;
+        sunkAtolls = data.format >= 79;
         for (int pass = 0; grabens && pass < ARC_DIST_SMOOTHING; pass++) blur3x3(arcDist);
         undergroundBiomes = data.format >= 60;
         baseFade = data.format >= 61;
@@ -566,6 +568,10 @@ public final class Terrain {
         for (Volcano v : landforms ? data.volcanoes : List.<Volcano>of()) {
             float summit = v.surfaceMetres(0);
             if (!v.hotspot() || v.gone() || summit > ATOLL_SUMMIT || summit < ATOLL_DEEPEST || Math.abs(Climate.latitude((int) v.v(), h)) > ATOLL_LATITUDE) continue;
+            // From format 79 only where the land there really lies under the sea: a volcano that grew from the sea floor
+            // has a cone summit below the sea by itself, but where it stands on land its lagoon, laid 4 blocks under the
+            // sea, cut a pit through the mountain (2,800 m up, x 15742 z 2194, seed -4666279112198633610).
+            if (sunkAtolls && data.metres[cell(Math.round(v.u()), Math.round(v.v()))] > ATOLL_SUMMIT) continue;
             Atoll a = new Atoll(wrapBlocks((v.u() - originX) * BLOCKS_PER_CELL), (v.v() - originY) * BLOCKS_PER_CELL, ATOLL_SHARE * v.radiusBlocks());
             int reach = (int) Math.ceil((a.radius * 1.3 + REEF_HALF + REEF_FRONT) / BLOCKS_PER_CELL) + 1, cu = Math.round(v.u()), cv = Math.round(v.v());
             for (int dy = -reach; dy <= reach; dy++)

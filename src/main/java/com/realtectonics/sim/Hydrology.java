@@ -236,8 +236,14 @@ public final class Hydrology {
             if (!v.caldera()) continue;
             int cu = (int) v.u(), cv = (int) v.v();
             float r = Volcano.CALDERA_SHARE * v.radiusBlocks() / Terrain.BLOCKS_PER_CELL;
-            float summit = Planet.metres(elevation[cu + cv * w]);
+            float summit = Planet.metres(elevation[cu + cv * w]), rim = summit;
+            for (int dy = -(int) r; dy <= r; dy++) // the highest of the cone within the caldera: its rim stands there
+                for (int dx = -(int) r; dx <= r; dx++)
+                    if (cv + dy >= 0 && cv + dy < h && Math.hypot(dx, dy) < r) rim = Math.max(rim, Planet.metres(elevation[Math.floorMod(cu + dx, w) + (cv + dy) * w]));
             float sink = Math.min(Volcano.CALDERA_DEPTH, CALDERA_SINK * (summit - v.baseMetres()));
+            // From format 79 the floor stays within CALDERA_DEPTH of the rim: sunk from a centre the rivers had already
+            // worn down, a volcano grown from the sea floor fell 2,300 m (seed -4666279112198633610, x 15742 z 2194).
+            float floor = Planet.fromMetres(rim - Volcano.CALDERA_DEPTH);
             if (sink <= 0) continue;
             for (int dy = -(int) r; dy <= r; dy++)
                 for (int dx = -(int) r; dx <= r; dx++) {
@@ -246,7 +252,7 @@ public final class Hydrology {
                     int g = Math.floorMod(cu + dx, w) + (cv + dy) * w;
                     float t = (float) Math.clamp((d - 0.6) / 0.4, 0, 1), wall = t * t * (3 - 2 * t);
                     float sunk = Planet.fromMetres(Planet.metres(elevation[g]) - sink * (1 - wall * wall));
-                    elevation[g] = Math.max(beforeCones[g], Math.min(elevation[g], sunk));
+                    elevation[g] = Math.max(Math.max(beforeCones[g], floor), Math.min(elevation[g], sunk));
                 }
         }
     }
