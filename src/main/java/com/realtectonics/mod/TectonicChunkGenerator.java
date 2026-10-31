@@ -58,7 +58,9 @@ public final class TectonicChunkGenerator extends ChunkGenerator {
             Codec.intRange(50, 1000).optionalFieldOf("steps", 300).forGetter(PlanetSettings::steps),
             Codec.floatRange(0.25f, 8).optionalFieldOf("river_width", 1f).forGetter(PlanetSettings::riverWidth), // older worlds keep their rivers
             Codec.BOOL.optionalFieldOf("earth", false).forGetter(PlanetSettings::earth),
-            Codec.BOOL.optionalFieldOf("medium_continents", false).forGetter(PlanetSettings::mediumContinents)
+            Codec.BOOL.optionalFieldOf("medium_continents", false).forGetter(PlanetSettings::mediumContinents),
+            Codec.floatRange(4, 64).optionalFieldOf("cliff_height", PlanetSettings.CLIFF_HEIGHT).forGetter(PlanetSettings::cliffHeight),
+            Codec.intRange(0, PlanetSettings.START_NAMES.length - 1).optionalFieldOf("start", 0).forGetter(PlanetSettings::start) // older Earth worlds keep spawn where the seed put it
     ).apply(i, PlanetSettings::new));
 
     public static final MapCodec<TectonicChunkGenerator> CODEC = RecordCodecBuilder.mapCodec(i -> i.group(
@@ -229,6 +231,12 @@ public final class TectonicChunkGenerator extends ChunkGenerator {
                 for (int n : new int[]{i - 1, i + 1, i - 18, i + 18})
                     held |= cols[n].water() >= cols[n].ground() || cols[n].lava() != Terrain.Column.NO_WATER || cols[n].ice() != Terrain.Column.NO_WATER;
                 int caveTop = caveField == null ? Integer.MIN_VALUE : c.ground() - (held ? Caves.ROOF : 0), solidTop = minY;
+                // From format 72 no pillars where the cave is open straight up to the sky: vanilla's stand in closed caverns,
+                // but where an entrance opened a cavern from above they rose from the pit, cut off flat where the entrance
+                // layer began (the user: "there is this kind of pillars in caves"). Pillars under the pit's rim stay.
+                int open = Integer.MAX_VALUE; // lowest y of the cave open straight up from here
+                if (terrain.openCaves && caveTop == c.ground())
+                    for (int y = caveTop; y > minY + Caves.FLOOR && caveField.air(lx, y, lz, c.ground() - y, false); y--) open = y;
                 BlockState solidState = BEDROCK;
                 LevelChunkSection section = null;
                 int sectionIndex = -1;
@@ -243,7 +251,7 @@ public final class TectonicChunkGenerator extends ChunkGenerator {
                                     : firn && c.ice() - y < FIRN_DEPTH ? SNOW_BLOCK // above the snow line (no bare ice, no rubble): last winters' snow
                                     : c.ice() - y >= BLUE_ICE_DEPTH || y == c.ice() && c.cover() == Terrain.Cover.BARE_ICE ? BLUE_ICE : PACKED_ICE)
                             : SNOW;
-                    if (y <= caveTop && y > minY + Caves.FLOOR && caveField.air(lx, y, lz, c.ground() - y)) state = y < Caves.LAVA_BELOW ? LAVA : AIR;
+                    if (y <= caveTop && y > minY + Caves.FLOOR && caveField.air(lx, y, lz, c.ground() - y, y < open)) state = y < Caves.LAVA_BELOW ? LAVA : AIR;
                     else if (y <= c.ground()) {
                         solidTop = y;
                         solidState = state;

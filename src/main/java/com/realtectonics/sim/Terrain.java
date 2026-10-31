@@ -31,6 +31,9 @@ public final class Terrain {
     static final float FALL_RIM = 0.15f;  // of a reach: how far past the lip the banks stay at the upper level
     static final float FALL_CHANCE = 0.4f, FALL_ALWAYS = 20; // share of steep reaches with falls; every reach dropping this far
     static final float GORGE_MIN = 12;   // blocks of drop per reach that make a narrow gorge
+    static final float WET_GORGE_STEEP = 2; // format 74: blocks of drop per cell where a wet upland river starts cutting a gorge into limestone or marble; full at twice that
+    static final float WET_GORGE_BANK = 6;  // format 74: blocks of wall beyond the river's half width and the gorge's depth: walls ~45°, steepest in the middle
+    static final float WET_GORGE_TAPER = 3; // format 74: blocks a wet gorge shallows per cell upstream of its steep reach, instead of ending at one tall fall
     static final float CANYON_HEIGHT = 15, CANYON_RAIN = 400; // dry uplands (blocks above sea, mm) where rivers cut canyons
     static final int CANYON_BENCHES = 4;
     static final float SHORE_BAND = 0.12f;          // land-mask units inland that count as the shore
@@ -72,6 +75,25 @@ public final class Terrain {
     static final float LAKE_CUT_MAX = 48;    // blocks above its surface beyond which a lake leaves the land standing (format 30)
     static final float ICE_FRONT = 4;        // blocks: height of a glacier's calving front above a lake (format 31)
     static final float FAULT_SCARP = 10, FAULT_SCARP_WIDTH = 2; // blocks a fast fault's scarp stands (150 m, a pressure ridge); unzoomed blocks its face spans
+    static final float HORST = 16;          // format 75: blocks a fault block of fully stretched crust stands over the basins beside it (240 m)
+    static final float HORST_SPACING = 192; // format 75: unzoomed blocks from one fault block to the next across the trench's strike
+    static final float TALL_HORST = 40;     // format 76: blocks a fault block stands where the crust is stretched the most (600 m); HORST where it is barely
+    static final float HORST_HALF = 0.2f, SCARP_BLOCKS = 15; // format 76: share of the fault spacing the flat top spans either side of its middle; unzoomed blocks the stepped scarp beyond it spans
+    static final int SCARP_STEPS = 3;       // format 76: faults a block's edge breaks into, each a cliff and a bench
+    static final float TABLE_STEP = 24;     // format 77: default blocks between the hard beds of a tableland, each a bench above a cliff (360 m; 12 read as many small steps); the Cliffs slider sets it
+    static final float TABLE_RISER = 0.06f; // format 77: share of a bed's height the cliff below its bench takes; the bench the rest
+    static final int BASE_REACH = 4; // format 80: cells round a spot on calm rock whose lowest ground is the base level its valleys cut down to
+    static final float CALM_HILLS = 0.6f; // format 80: share of its height a calm plain still rolls with however shallow its valleys, low swells and old worn hills
+    static final float TABLE_LOW = 40, TABLE_HIGH = 70; // format 77: blocks above the sea where sedimentary land starts to stand as tableland, and fully
+    static final float FJORD_HALF = 0.7f;   // format 78: a fjord's trough this share of a glacial trough's width (narrow water under tall walls)
+    static final float FJORD_POWER = 3;     // format 78: its U shape: higher is a flatter floor under steeper walls
+    static final float FJORD_DEPTH = 24, FJORD_DEPTH_MAX = 44; // format 78: blocks of water over a fjord's floor, more for bigger glaciers (Sognefjord 1,300 m)
+    static final float FJORD_SILL = 5;      // format 78: blocks of water over the rock sill at a fjord's mouth
+    static final float FJORD_WALL = 2;      // format 78: the band a fjord's walls ease back down to the land over, in trough widths from its axis
+    static final float FJORD_RIM_MAX = 80;  // format 78: blocks a fjord's rim stands at most above the sea (1,200 m)
+    static final int FJORD_ICE = 24;        // format 78: a glacier surface lower than this above the sea over a fjord's trough has melted away
+    static final float FJORD_AREA = 5;      // format 78: flow from which a fjord cell gets its trough, so fjords reach up their narrow heads and branches (Hydrology.GLACIER_AREA before)
+    static final float GRABEN_FILL = 2, GRABEN_FILL_MAX = 8; // format 76: blocks under the smoothed land the basin's sediment floor lies; deepest hollow it fills
     static final int SPRING_TILT = 3;     // blocks the ground round a hot spring may rise above its pool
     static final float CRATER_OWN = 4;    // blocks above its volcano's own cone the ground may stand and still be cut by its crater
     static final float ICE_EDGE = 12;     // blocks below the land the ice surface sinks at cells without ice, so glaciers thin to their edges
@@ -187,6 +209,7 @@ public final class Terrain {
     private final float iceCapBelow;   // °C: older planets keep their old ice line
     private final boolean lowlandRivers;  // meanders and deltas: format 7; off on older planets, so their rivers stay put
     private final float riverWidth;
+    private final float tableStep;        // format 77: blocks between tableland benches (PlanetSettings.cliffHeight)
     private final boolean organic;        // curved rivers, creeks, ragged deltas, patchy biomes: format 10
     private final boolean landforms;      // waterfalls, gorges, canyons and the other landforms: format 11
     private final boolean richBiomes;     // rivers, shores, ocean temperatures and mountain zones: format 12
@@ -238,6 +261,19 @@ public final class Terrain {
     private final boolean magmaVents;     // patches of magma on active volcanoes, thickest round the crater (magmaPatch): format 58
     public final boolean noiseCaves;      // vanilla's noise caves under the terrain (mod.Caves): format 59
     public final boolean undergroundBiomes; // dripstone under limestone, lush caves under wet climates, the deep dark under old high crust (TectonicBiomeSource): format 60
+    public final boolean openCaves;       // no cave pillars where the cave is open straight up to the sky (mod.Caves): format 72
+    private final boolean lakeOutlets;    // a lake's shore ring leaves the channel of a lower river leaving it open: format 73
+    private final boolean wetGorges;      // steep rivers on wet limestone and marble uplands cut gorges with wooded, craggy walls: format 74
+    private final boolean faultBlocks;    // flat-topped fault blocks behind trenches that roll back (data.backArc): format 75
+    private final boolean grabens;        // fault blocks taller where stretched more, stepped scarps, flat basin floors, rock layers lifted with the block: format 76
+    private final boolean tablelands;     // uplifted flat-lying sedimentary rock as benches and cliffs, mesas and buttes: format 77
+    private final float fjordArea;        // format 78: FJORD_AREA, before Hydrology.GLACIER_AREA (fjords themselves come from the planet file)
+    private final boolean sunkAtolls;     // atolls only where the land at their volcano is under the sea: format 79
+    private final float[] hillRoom;       // format 80: blocks of height the land's hills and massifs grow from; on calm rock only its height over the lowest ground within BASE_REACH, blurred; null before
+    private final float[] fjordRim;       // format 78: per fjord cell, the highest land within a cell of it (the valley's rim), at most FJORD_RIM_MAX over the sea; null before
+    private final float[] sediment;       // format 77: the sedimentary platform (Rock.BASIN) blurred, 0-1 per cell
+    private final float[] arcDist;        // format 76: data.backArcDist smoothed more, so faults bend round where the nearest trench changes instead of meeting in a crease
+    static final int ARC_DIST_SMOOTHING = 6; // format 76: blur passes over it (cells)
     private final boolean baseFade;       // the base level fades out away from the river instead of ending where the river search does: format 61
     private final boolean wrappedRims;    // a crater floor finds its rim across the planet's seam too (format 42 used the unwrapped offset): format 62
     private final boolean calderaWalls;   // neighbouring cones' shaping fades across a caldera's edge instead of stopping at it: format 63
@@ -297,7 +333,18 @@ public final class Terrain {
 
     /** riverWidth: rivers, creeks and delta channels this many times wider in blocks. */
     public Terrain(PlanetData data, long seed, float mountainScale, int zoom, float riverWidth) {
+        this(data, seed, mountainScale, zoom, riverWidth, TABLE_STEP);
+    }
+
+    /** cliffHeight: blocks from one tableland bench to the next, the height of each of its cliffs (format 77). */
+    public Terrain(PlanetData data, long seed, float mountainScale, int zoom, float riverWidth, float cliffHeight) {
+        this(data, seed, mountainScale, zoom, riverWidth, cliffHeight, null);
+    }
+
+    /** start: latitude and longitude spawn goes nearest to (PlanetSettings.startPlace), or null for anywhere by seed. */
+    public Terrain(PlanetData data, long seed, float mountainScale, int zoom, float riverWidth, float cliffHeight, double[] start) {
         this.riverWidth = riverWidth;
+        tableStep = cliffHeight;
         this.data = data;
         this.seed = seed;
         this.zoom = zoom;
@@ -355,6 +402,16 @@ public final class Terrain {
         firn = data.format >= 57;
         magmaVents = data.format >= 58;
         noiseCaves = data.format >= 59;
+        openCaves = data.format >= 72;
+        lakeOutlets = data.format >= 73;
+        wetGorges = data.format >= 74;
+        faultBlocks = data.format >= 75;
+        grabens = data.format >= 76;
+        arcDist = grabens ? data.backArcDist.clone() : null;
+        tablelands = data.format >= 77;
+        fjordArea = data.format >= 78 ? FJORD_AREA : Hydrology.GLACIER_AREA;
+        sunkAtolls = data.format >= 79;
+        for (int pass = 0; grabens && pass < ARC_DIST_SMOOTHING; pass++) blur3x3(arcDist);
         undergroundBiomes = data.format >= 60;
         baseFade = data.format >= 61;
         wrappedRims = data.format >= 62;
@@ -386,6 +443,28 @@ public final class Terrain {
             silt[g] = data.metres[g] >= 0 && data.receiver[g] >= 0 && data.metres[data.receiver[g]] < 0 ? Math.min(1, data.flow[g] / (8 * Hydrology.RIVER_AREA)) : 0;
         for (int pass = 0; variedShores && pass < 6; pass++) { blur3x3(bay); blur3x3(silt); }
         for (int pass = 0; pass < 2; pass++) blur3x3(lakes);
+        sediment = tablelands ? new float[w * h] : null;
+        for (int g = 0; tablelands && g < w * h; g++) sediment[g] = data.rock[g] == Rock.BASIN.ordinal() ? 1 : 0;
+        for (int pass = 0; tablelands && pass < 3; pass++) blur3x3(sediment);
+        // A high plain on an old craton or a sedimentary platform is not rugged for being high: no plates squeeze it, and
+        // rivers can cut it only as deep as the low ground they drain to (the High Plains, the Highveld). Mountain belts,
+        // arcs and volcanic land keep relief that grows with height.
+        hillRoom = data.format >= 80 ? new float[w * h] : null;
+        for (int g = 0; hillRoom != null && g < w * h; g++) { // ponytail: plain 9x9 min, a separable one if world load ever drags
+            float low = groundY[g];
+            for (int dy = -BASE_REACH; dy <= BASE_REACH; dy++)
+                for (int dx = -BASE_REACH; dx <= BASE_REACH; dx++) low = Math.min(low, groundY[cell(g % w + dx, g / w + dy)]);
+            boolean calm = data.rock[g] == Rock.CRATON.ordinal() || data.rock[g] == Rock.BASIN.ordinal();
+            hillRoom[g] = Math.max(groundY[g] - Math.max(SEA_Y, low), CALM_HILLS * (groundY[g] - SEA_Y)) + (calm ? 0 : MAX_Y);
+        }
+        for (int pass = 0; hillRoom != null && pass < 3; pass++) blur3x3(hillRoom); // eases from plain to range over a few cells
+        fjordRim = data.format >= 78 ? new float[w * h] : null;
+        for (int c = 0; fjordRim != null && c < w * h; c++) {
+            if (data.ice[c] != Hydrology.FJORD) continue;
+            float top = groundY[c];
+            for (int dy = -1; dy <= 1; dy++) for (int dx = -1; dx <= 1; dx++) top = Math.max(top, groundY[cell(c % w + dx, c / w + dy)]);
+            fjordRim[c] = Math.min(top, SEA_Y + FJORD_RIM_MAX);
+        }
         rangeY = folds ? new float[w * h] : null;
         foothill = folds ? new float[w * h] : null;
         orogen = folds ? new float[w * h] : null;
@@ -411,7 +490,7 @@ public final class Terrain {
             int r = data.receiver[c];
             if (r >= 0 && (mainDonor[r] < 0 || data.flow[c] > data.flow[mainDonor[r]])) mainDonor[r] = c;
         }
-        spawnCell = spawnCell();
+        spawnCell = spawnCell(start);
         originX = spawnCell % w;
         originY = spawnCell / w;
         riverLevel = groundY.clone();
@@ -424,7 +503,7 @@ public final class Terrain {
         if (landforms) glacialForms();
         iceNear = new byte[w * h]; // nearestRiver's trough search turns up nothing on most land: skip it there
         for (int c = 0; c < w * h; c++) {
-            if (data.receiver[c] < 0 || data.metres[c] < 0 || data.ice[c] == 0 || data.flow[c] <= Hydrology.GLACIER_AREA) continue;
+            if (data.receiver[c] < 0 || data.metres[c] < 0 || data.ice[c] == 0 || data.flow[c] <= (data.ice[c] == Hydrology.FJORD ? Math.min(fjordArea, Hydrology.GLACIER_AREA) : Hydrology.GLACIER_AREA)) continue;
             for (int dy = -3; dy <= 3; dy++)
                 for (int dx = -3; dx <= 3; dx++) {
                     int y = c / w + dy;
@@ -509,6 +588,10 @@ public final class Terrain {
         for (Volcano v : landforms ? data.volcanoes : List.<Volcano>of()) {
             float summit = v.surfaceMetres(0);
             if (!v.hotspot() || v.gone() || summit > ATOLL_SUMMIT || summit < ATOLL_DEEPEST || Math.abs(Climate.latitude((int) v.v(), h)) > ATOLL_LATITUDE) continue;
+            // From format 79 only where the land there really lies under the sea: a volcano that grew from the sea floor
+            // has a cone summit below the sea by itself, but where it stands on land its lagoon, laid 4 blocks under the
+            // sea, cut a pit through the mountain (2,800 m up, x 15742 z 2194, seed -4666279112198633610).
+            if (sunkAtolls && data.metres[cell(Math.round(v.u()), Math.round(v.v()))] > ATOLL_SUMMIT) continue;
             Atoll a = new Atoll(wrapBlocks((v.u() - originX) * BLOCKS_PER_CELL), (v.v() - originY) * BLOCKS_PER_CELL, ATOLL_SHARE * v.radiusBlocks());
             int reach = (int) Math.ceil((a.radius * 1.3 + REEF_HALF + REEF_FRONT) / BLOCKS_PER_CELL) + 1, cu = Math.round(v.u()), cv = Math.round(v.v());
             for (int dy = -reach; dy <= reach; dy++)
@@ -1005,14 +1088,15 @@ public final class Terrain {
         keep[0] = smooth;
         keep[1] = shore;
         keep[2] = rough;
-        float above = Math.max(0, natural - SEA_Y);
+        float room = hillRoom != null ? cubic(hillRoom, u, v) : Float.MAX_VALUE; // format 80: calm rock roughens only as deep as its valleys are
+        float above = Math.max(0, Math.min(room, natural - SEA_Y));
         natural += rough * (organic ? 5 + 0.06f * above : 3 + 0.05f * above); // mountains are rougher than plains
         if (organic) { // ridged noise: sharp crests and spurs on high ground instead of rounded humps
             float ridge = 1 - Math.abs(fine(x, z, 128, 26)) - 0.5f * Math.abs(fine(x, z, 64, 27));
             natural += ridge * (talus ? Math.min(0.12f * above, RIDGE_CAP) : 0.12f * above) * smoothstep(above / 60);
         }
         if (zoom > 1) { // a zoomed cell spans hills the planet's cells can't hold; none at the shore, so no islets
-            above = Math.max(0, natural - SEA_Y);
+            above = Math.max(0, Math.min(room, natural - SEA_Y));
             natural += (zoom - 1) * HILLS * (noise(x, z, 128, 18) + 0.5f * noise(x, z, 64, 19)) * (1 + 0.02f * above) * smoothstep(above / 12);
         }
         if (landforms && Math.abs(shore) < 0.3f) natural = coast(x, z, u, v, shore, natural);
@@ -1020,13 +1104,15 @@ public final class Terrain {
         // Massifs: a range is many peaks, spurs and deep valleys, not one dome. Ridged relief at the 128-512 block
         // scale, growing with height, so plains stay calm and the highest ranges are cut the deepest.
         float ridgeline = 0;
-        if (massifs && natural > SEA_Y + 20) {
+        if (massifs && Math.min(room, natural - SEA_Y) > 20) {
             ridgeline = ridgeline(x, z);
-            float high = natural - SEA_Y, relief = Math.min(talus ? TALUS_MASSIF_RELIEF : MASSIF_RELIEF, MASSIF_SHARE * high) * smoothstep((high - 20) / 60);
+            float high = Math.min(room, natural - SEA_Y), relief = Math.min(talus ? TALUS_MASSIF_RELIEF : MASSIF_RELIEF, MASSIF_SHARE * high) * smoothstep((high - 20) / 60);
             natural += relief * (2 * ridgeline - (talus ? MASSIF_MEAN : 0.8f)); // from format 19 peaks and valleys around the planet's height, not above it
         }
         if (gullies && !simGullies && natural > SEA_Y + 20) natural += gullies(x, z, u, v, natural - SEA_Y) * (1 - ridgeline * ridgeline * ridgeline); // none on the crests; from 33 water cuts them (relaxTile)
         if (faults) natural += faultScarp(x, z, u, v, natural);
+        if (faultBlocks) natural += grabens ? grabens(x, z, u, v, natural) : faultBlocks(x, z, u, v, natural);
+        if (tablelands) natural = tableland(x, z, u, v, natural, keep[0]);
         natural = softCeiling(natural);
         // From format 22 volcano summits are sharpened here, as part of the land, so rivers cut through them later
         // instead of being buried by them.
@@ -1066,6 +1152,133 @@ public final class Terrain {
         if (Math.abs(d) > 2) return 0;
         float height = FAULT_SCARP * Math.min(1, slip / Hydrology.FAULT_FULL_SLIP) * Math.clamp(2 * noise(x, z, 512, 43), -1, 1);
         return height * (smoothstep(d + 0.5f) - 0.5f) * smoothstep((natural - SEA_Y) / 8); // none on the beach
+    }
+
+    /**
+     * Format 75: where back-arc extension stretched the crust, normal faults running along the trench break it into
+     * blocks; every other one stands raised with steep scarps, its top the old land surface lifted flat (a horst), the
+     * low ground between left as the basin (a graben): the Aegean's plateaus and plains. The top is the smoothed land
+     * lifted (rangeY), so dells on it fill and only hills poke through, but never less than half the lift over the land
+     * there. The faults wander and die out along their length. Only raises the ground, so it opens no pit to hold or
+     * spill water; a river keeps its own channel and saws a gorge through the block.
+     */
+    private float faultBlocks(double x, double z, double u, double v, float natural) {
+        float stretch = cubic(data.backArc, u, v);
+        if (stretch < 0.02f || natural < SEA_Y + 2) return 0;
+        double phase = cubic(data.backArcDist, u, v) * BLOCKS_PER_CELL / HORST_SPACING + 0.25 * fine(x, z, 512, 79);
+        float t = (float) Math.cos(2 * Math.PI * phase), along = smoothstep((fine(x, z, 512, 80) + 0.35f) / 0.5f);
+        float onLand = smoothstep((natural - SEA_Y - 2) / 8) * (1 - smoothstep(cubic(lakes, u, v) / 0.3f));
+        float lift = HORST * Math.min(1, 2 * stretch) * along * onLand;
+        float top = Math.max(natural + 0.5f * lift, cubic(rangeY, u, v) + lift);
+        return Math.min(top - natural, 2.5f * lift) * smoothstep((t - 0.1f) / 0.25f);
+    }
+
+    /**
+     * Format 76: the fault blocks as the textbook horst and graben. A block stands TALL_HORST where the crust is
+     * stretched the most; its edge breaks down in SCARP_STEPS faults, each a cliff and a bench; the basin between two
+     * blocks fills with sediment washed off them into a level floor (hollows up to GRABEN_FILL_MAX deep); and the rock
+     * layers rise with the block (faultUplift, in column()), so a scarp shows them offset. Still only raises the ground.
+     */
+    private float grabens(double x, double z, double u, double v, float natural) {
+        float stretch = cubic(data.backArc, u, v);
+        if (stretch < 0.02f || natural < SEA_Y + 2) return 0;
+        float onLand = smoothstep((natural - SEA_Y - 2) / 8) * (1 - smoothstep(cubic(lakes, u, v) / 0.3f));
+        float[] b = faultBlock(x, z, u, v, stretch);
+        float lift = b[0] * onLand, up = lift * b[1], floor = cubic(rangeY, u, v) - GRABEN_FILL;
+        float target = floor + up + GRABEN_FILL * b[1]; // the basin's floor, stepping up to the smoothed land lifted
+        return Math.clamp(target - natural, 0.5f * up, 2 * up + GRABEN_FILL_MAX * lift / TALL_HORST);
+    }
+
+    /**
+     * Format 77: tablelands. Uplifted flat-lying sedimentary rock is a layer cake of hard and soft beds: each hard bed
+     * holds up a flat bench and breaks off at its edge in a cliff, so slopes weather into stairs of benches and cliffs
+     * (the Colorado Plateau, the Grand Staircase), a lone hill keeps a flat top inside a cliff (a mesa, a butte), and
+     * canyons step down their walls. Not on rugged ground standing well above the land's smooth height (ridges):
+     * there a narrow crest just past a bed's top was raised a whole step into a spire. The beds dip gently across the
+     * land. Only raises the ground, by at most a step, so it opens no pit, and the rock bands in the cliffs stay level.
+     */
+    private float tableland(double x, double z, double u, double v, float natural, float smooth) {
+        float share = cubic(sediment, u, v) * smoothstep((smooth - SEA_Y - TABLE_LOW) / (TABLE_HIGH - TABLE_LOW));
+        if (share <= 0.01f) return natural;
+        share *= (1 - smoothstep(cubic(lakes, u, v) / 0.3f)) * (1 - smoothstep((natural - smooth - tableStep / 2) / (tableStep / 2)));
+        float dip = SEA_Y + tableStep * fine(x, z, 2048, 81), bed = (natural - dip) / tableStep, k = (float) Math.floor(bed);
+        float stair = dip + (k + smoothstep((bed - k) / TABLE_RISER)) * tableStep;
+        return natural + share * Math.clamp(stair - natural, 0, tableStep);
+    }
+
+    /** Format 76: blocks the fault block at this column was lifted (0 in a basin); its rock layers go up as far. */
+    private float faultUplift(double x, double z, double u, double v) {
+        float stretch = cubic(data.backArc, u, v);
+        if (stretch < 0.02f) return 0;
+        float[] b = faultBlock(x, z, u, v, stretch);
+        return b[0] * b[1];
+    }
+
+    /**
+     * Format 76: {the block's full lift here, ending at a cross-fault where its fault dies out; 1 on its top, stepping
+     * down across the scarp to 0 in the basin}. The scarp spans SCARP_BLOCKS whatever the spacing, which widens where
+     * the distance to the trench changes slowly, or a far block's scarp came out a gentle ramp. Where a block ends is
+     * picked on its middle line (the column stepped back across the strike to it), so a block stands or ends whole,
+     * never cut lengthwise into a sliver ridge.
+     */
+    private float[] faultBlock(double x, double z, double u, double v, float stretch) {
+        float dist = cubic(arcDist, u, v), e = 0.5f;
+        float du = cubic(arcDist, u + e, v) - cubic(arcDist, u - e, v), dv = cubic(arcDist, u, v + e) - cubic(arcDist, u, v - e);
+        float grad = (float) hyp(du, dv) / (2 * e);
+        double phase = dist * BLOCKS_PER_CELL / HORST_SPACING + 0.25 * fine(x, z, 512, 79);
+        float scarp = Math.max(0.02f, SCARP_BLOCKS * grad / HORST_SPACING); // in phase: blocks times phase per block
+        float off = (float) Math.abs(phase - Math.rint(phase)), k = Math.clamp((off - HORST_HALF) / scarp, 0, 1) * SCARP_STEPS;
+        float step = (float) Math.floor(k), down = Math.min(1, (step + smoothstep((k - step - 0.5f) / 0.5f)) / SCARP_STEPS);
+        float lift = (HORST + (TALL_HORST - HORST) * smoothstep((stretch - 0.5f) / 0.4f)) * Math.min(1, 2 * stretch);
+        // Blocks back to the middle line; none where the distance peaks between two trenches, as there it flips side to side
+        double back = (phase - Math.rint(phase)) * HORST_SPACING / Math.max(grad, 0.05f) * smoothstep((grad - 0.1f) / 0.3f), len = Math.max(hyp(du, dv), 1e-6);
+        return new float[]{lift * smoothstep((fine(x - back * du / len, z - back * dv / len, 512, 80) + 0.2f) / 0.1f), 1 - down};
+    }
+
+    /**
+     * The lake's shores at a column near one (lakeness over 0.02, ly its level, sill a higher lake's when on the lip
+     * between two): {ground, water, 1 if a salt flat}. Moved out of column() unchanged, to keep it small for the JIT.
+     */
+    private int[] lakeShore(float lakeness, float rain, float ly, float sill, int ground, int water) {
+        int salt = 0;
+        if (!Float.isNaN(sill)) ground = Math.max(ground, Math.round(sill)); // the rock lip holding a higher lake above a lower one
+        else if (!Float.isNaN(ly)) {
+            // From format 22 water also fills any hollow below the surface inside the shore ring, so a lake one or
+            // two cells across (a caldera's) is water, not a flat floor raised to its level.
+            // From format 25 the shore band slopes: the ground there may rise from the water's edge up to
+            // LAKE_SHORE_RISE blocks across the band, so a hill reaching the lake meets it as a slope, not a cut cliff.
+            // From format 30 the lake's blurred outline, drawn on 32-block cells, may only cut land that barely rises
+            // above it; a volcano or a range standing inside the outline is the lake's shore, not cut off along it.
+            // From format 31 that limit is a ramp, not a line: the higher the land stands above the lake the less of it
+            // the outline cuts, so a shore climbing past the limit rises as a slope, not a wall 40 blocks high.
+            float kept = rampShores ? smoothstep((ground - ly) / LAKE_CUT_MAX) : solidShores && ground > ly + LAKE_CUT_MAX ? 1 : 0;
+            boolean standing = kept >= 1;
+            int uncut = ground;
+            if (gentleShores && !standing && lakeness > SHORE_FULL && lakeness <= 0.5f) {
+                ground = Math.min(ground, Math.round(ly - 1 + LAKE_SHORE_RISE * smoothstep((0.5f - lakeness) / (0.5f - SHORE_FULL))));
+                ground = Math.round(ground + kept * (uncut - ground));
+            }
+            boolean flooded = !standing && (lakeness > 0.5f || simCalderas && lakeness > SHORE_FULL && ground < (int) ly);
+            if (flooded) {
+                ground = Math.min(ground, (int) ly - 1 - Math.max(0, Math.round((lakeness - 0.5f) * 8)));
+                ground = Math.round(ground + kept * (uncut - ground)); // partly kept: dry land above the water, holding it in
+                if (ground < (int) ly) water = Math.max(water, (int) ly);
+            } else if (!gentleShores || lakeness <= SHORE_FULL || standing) {
+                // The shore ring stands at the surface; past it the ground slopes down instead of ending in a wall
+                // where an outlet canyon has cut the land below the lake.
+                float taper = folds ? LAKE_TAPER * smoothstep((SHORE_FULL - lakeness) / (SHORE_FULL - 0.02f)) : 0;
+                // From format 73 not across the channel of a river at or below the lake: the ring filled the outlet with a strip of
+                // land between the lake and its river (the user: "the lakes borders cut the river"); now the lake spills
+                // into it, a step from water to lower water.
+                if (!(lakeOutlets && water != Column.NO_WATER && water <= ly)) ground = Math.max(ground, Math.round(ly - taper));
+                // Salt flats: a desert lake shrinks and leaves its old bed as a flat white crust around it.
+                if (landforms && rain < SALT_RAIN && lakeness > 0.08f && ground <= ly + SALT_RISE && (!folds || ground >= ly - SALT_RISE)) {
+                    ground = (int) ly;
+                    salt = 1;
+                }
+            }
+        }
+        return new int[]{ground, water, salt};
     }
 
     /** x, z: unzoomed blocks. Large features are laid out in them; fine ones go through fine() and stay in real blocks. */
@@ -1143,15 +1356,18 @@ public final class Terrain {
                 if (!iceSheets && valley.ice != Hydrology.FJORD && thick > 1 && (glacierFlow || bilinear(data.precipitation, u, v) >= GLACIER_MIN_RAIN))
                     ice = Math.round(vy + 1 + thick * (1 - 0.5f * t * t)); // a little convex, like a real glacier's surface
             }
-            River fjord = nearestRiver(u, v, Hydrology.FJORD, Hydrology.GLACIER_AREA);
-            float tf = troughFraction(fjord, width);
-            if (tf < 1) {
-                inFjord = true;
-                ground = Math.min(ground, trough(SEA_Y - 2 - Math.min(40, 16 + 0.1f * (float) Math.sqrt(fjord.flow)), ground, tf));
-            }
+        }
+        // From format 78 a fjord's narrow head and branches have their trough too, near a big glacial valley or not
+        River fjord = valley != NO_RIVER || fjordArea < Hydrology.GLACIER_AREA ? nearestRiver(u, v, Hydrology.FJORD, fjordArea) : NO_RIVER;
+        float tf = troughFraction(fjord, (1 + 0.3f * noise(x, z, 256, 10)) * (fjordRim != null ? FJORD_HALF * FJORD_WALL : 1));
+        if (tf < 1) {
+            inFjord = fjordRim == null || tf * FJORD_WALL < 1;
+            if (fjordRim != null) ground = fjordCut(fjord, ground, tf * FJORD_WALL);
+            else ground = Math.min(ground, trough(SEA_Y - 2 - Math.min(40, 16 + 0.1f * (float) Math.sqrt(fjord.flow)), ground, tf));
+            if (fjordArea < Hydrology.GLACIER_AREA && ice != Column.NO_WATER && ice < SEA_Y + FJORD_ICE) ice = Column.NO_WATER; // from 78 the sea took the trough: no ice hanging over it
         }
         float bank = 8 + 2 * river.half, drop = river.top - river.bottom;
-        boolean gorge = false, canyon = false;
+        boolean gorge = false, canyon = false, wetGorge = false;
         if (landforms && !inFjord && river != NO_RIVER) {
             // Waterfalls: a steep reach drops at one ledge instead of a block at a time. Its valley floor is lifted above
             // the ledge and cut down below it, fading out across three valley widths, so the pool above stays enclosed.
@@ -1172,8 +1388,10 @@ public final class Terrain {
             }
             gorge = drop >= GORGE_MIN;
             canyon = !gorge && river.incision > 3;
+            wetGorge = canyon && wetGorges && data.precipitation[river.cell] >= CANYON_RAIN;
             if (gorge) bank = 4 + 1.2f * river.half;   // narrow, walls straight up from the water
-            if (canyon) bank = 12 + 2 * river.half + 1.5f * river.incision; // wide, stepping down in benches
+            if (canyon) bank = wetGorge ? WET_GORGE_BANK + river.half + river.incision // steep and even: rain keeps no layered steps
+                    : 12 + 2 * river.half + 1.5f * river.incision; // wide, stepping down in benches
         }
         // Alluvial fans: where a stream leaves its mountain valley for the dry plain it drops its gravel in a cone.
         if (landforms) for (Fan fan : deltasByCellFans.get(cell(iu, iv))) {
@@ -1217,13 +1435,13 @@ public final class Terrain {
             } else { // valley sides ease from just above the water back to the natural slope
                 // The bank starts flush with the water (one block up on planets from before), then eases to the land.
                 // A steep river climbs block by block, so its bank keeps a lip that high, or the water above spills over.
-                float e = river.edge / bank, s = gorge ? (float) Math.sqrt(e) : canyon ? benches(e) : smoothstep(e);
+                float e = river.edge / bank, s = gorge ? (float) Math.sqrt(e) : canyon && !wetGorge ? benches(e) : smoothstep(e);
                 int lip = landforms ? bankRy + Math.round(1.5f * drop / blocksPerCell * zoom) : ry + 1;
                 // Never down from the water: where the land around lies lower, the bank is a flat floodplain at the water.
                 // From format 20 that floodplain is only a levee: past PERCHED_HOLD blocks it eases down to the land.
                 float down = perchedBanks ? smoothstep((river.edge - PERCHED_HOLD) / Math.max(1, bank - PERCHED_HOLD)) : 0;
                 ground = Math.round(lip + (ground >= lip || !massifs ? s : down) * (ground - lip));
-                if (landforms && (gorge || canyon)) cover = Cover.CLIFF;                       // walls that stand as bare rock
+                if (landforms && (gorge || canyon) && (!wetGorge || crag(x, z, e))) cover = Cover.CLIFF; // walls that stand as bare rock
                 else if (landforms && ground <= ry + BANK_RISE && river.edge < BANK_WIDTH) cover = Cover.BANK; // sand, gravel or mud at the water's edge
                 // Oxbow lakes: loops the meandering river cut off, left as crescents of still water on its floodplain.
                 if (low > 0.5f && river.flow > OXBOW_FLOW && river.edge > 3 && river.edge < 0.8f * bank && fine(x, z, 64, 48) > 0.35f
@@ -1268,39 +1486,11 @@ public final class Terrain {
             ly = near[0];
             sill = near[1];
         }
-        if (!Float.isNaN(sill)) ground = Math.max(ground, Math.round(sill)); // the rock lip holding a higher lake above a lower one
-        else if (!Float.isNaN(ly)) {
-            // From format 22 water also fills any hollow below the surface inside the shore ring, so a lake one or
-            // two cells across (a caldera's) is water, not a flat floor raised to its level.
-            // From format 25 the shore band slopes: the ground there may rise from the water's edge up to
-            // LAKE_SHORE_RISE blocks across the band, so a hill reaching the lake meets it as a slope, not a cut cliff.
-            // From format 30 the lake's blurred outline, drawn on 32-block cells, may only cut land that barely rises
-            // above it; a volcano or a range standing inside the outline is the lake's shore, not cut off along it.
-            // From format 31 that limit is a ramp, not a line: the higher the land stands above the lake the less of it
-            // the outline cuts, so a shore climbing past the limit rises as a slope, not a wall 40 blocks high.
-            float kept = rampShores ? smoothstep((ground - ly) / LAKE_CUT_MAX) : solidShores && ground > ly + LAKE_CUT_MAX ? 1 : 0;
-            boolean standing = kept >= 1;
-            int uncut = ground;
-            if (gentleShores && !standing && lakeness > SHORE_FULL && lakeness <= 0.5f) {
-                ground = Math.min(ground, Math.round(ly - 1 + LAKE_SHORE_RISE * smoothstep((0.5f - lakeness) / (0.5f - SHORE_FULL))));
-                ground = Math.round(ground + kept * (uncut - ground));
-            }
-            boolean flooded = !standing && (lakeness > 0.5f || simCalderas && lakeness > SHORE_FULL && ground < (int) ly);
-            if (flooded) {
-                ground = Math.min(ground, (int) ly - 1 - Math.max(0, Math.round((lakeness - 0.5f) * 8)));
-                ground = Math.round(ground + kept * (uncut - ground)); // partly kept: dry land above the water, holding it in
-                if (ground < (int) ly) water = Math.max(water, (int) ly);
-            } else if (!gentleShores || lakeness <= SHORE_FULL || standing) {
-                // The shore ring stands at the surface; past it the ground slopes down instead of ending in a wall
-                // where an outlet canyon has cut the land below the lake.
-                float taper = folds ? LAKE_TAPER * smoothstep((SHORE_FULL - lakeness) / (SHORE_FULL - 0.02f)) : 0;
-                ground = Math.max(ground, Math.round(ly - taper));
-                // Salt flats: a desert lake shrinks and leaves its old bed as a flat white crust around it.
-                if (landforms && rain < SALT_RAIN && lakeness > 0.08f && ground <= ly + SALT_RISE && (!folds || ground >= ly - SALT_RISE)) {
-                    ground = (int) ly;
-                    cover = Cover.SALT;
-                }
-            }
+        if (!Float.isNaN(ly)) { // the shores, in their own method: column() must stay under the JIT's 8,000 bytes
+            int[] lake = lakeShore(lakeness, rain, ly, sill, ground, water);
+            ground = lake[0];
+            water = lake[1];
+            if (lake[2] != 0) cover = Cover.SALT;
         }
         // Dune seas in the driest deserts: long ridges across the wind (east-west here, so crests run north-south).
         if (landforms && water == Column.NO_WATER && rain < DUNE_RAIN && ground > SEA_Y + 1 && cover == Cover.NONE) {
@@ -1505,6 +1695,7 @@ public final class Terrain {
         // Rock layers bend gently under plains and fold hard inside mountain ranges, where plates collided.
         int fold = Math.round(fine(x, z, 512, 5) * (12 + 0.1f * Math.max(0, ground - SEA_Y)) + fine(x, z, 64, 6) * 4);
         if (foldedStrata && folds) fold += strataFold(x, z, u, v);
+        if (grabens) fold -= Math.round(faultUplift(x, z, u, v)); // a raised block carries its rock layers up with it
         // Province edges interfinger over a few dozen blocks instead of following the warped cell outline.
         Rock rock = Rock.of(data.rock[cell((int) Math.round(u + 0.4 * noise(x, z, 32, 8)), (int) Math.round(v + 0.4 * noise(x, z, 32, 9)))]);
         // From format 38 a river waters its banks from below: through a desert it runs in a green strip (the Nile), wider
@@ -1591,6 +1782,11 @@ public final class Terrain {
      * Rivers on dry uplands cut canyons: the drier and higher the plateau, the deeper. Levels are then made to never
      * rise downstream, so canyon water always runs downhill and meets the open river at its mouth without a step up.
      */
+    /** Format 74: a wet gorge's wall is wooded, with bare crags where it stands steepest, mid-wall (the Taurus, the Verdon). */
+    private boolean crag(double x, double z, float e) {
+        return fine(x, z, 32, 78) > 4 * Math.abs(e - 0.5f) - 0.6f;
+    }
+
     private void canyons() {
         Integer[] byHeight = new Integer[w * h];
         for (int g = 0; g < byHeight.length; g++) byHeight[g] = g;
@@ -1603,12 +1799,21 @@ public final class Terrain {
             }
             float below = r >= 0 ? Math.max(riverLevel[r], SEA_Y - 1) : groundY[g], level = Math.max(groundY[g], below);
             float rain = data.precipitation[g];
-            if (r >= 0 && data.flow[g] >= CREEK_AREA && groundY[g] > SEA_Y + CANYON_HEIGHT && rain < CANYON_RAIN && data.ice[g] == 0) {
+            if (r >= 0 && data.flow[g] >= CREEK_AREA && groundY[g] > SEA_Y + CANYON_HEIGHT && (rain < CANYON_RAIN || wetGorges) && data.ice[g] == 0) {
                 // Cut in from where the river leaves the plateau: never below the reach downstream, so the canyon
                 // deepens by the river's own fall with every cell upstream, as real canyons grow headward.
                 float want = Math.min(CANYON_MAX, CANYON_CUT * (groundY[g] - SEA_Y - CANYON_HEIGHT));
                 float dry = smoothstep((CANYON_RAIN - rain) / 150), big = smoothstep(data.flow[g] / (4 * CREEK_AREA));
-                level = Math.max(below, groundY[g] - want * dry * big);
+                // From format 74 rain does not stop the cut on limestone and marble: water sinks into them instead of
+                // wearing the slopes back, so a river steepened by uplift cuts a gorge whose walls stand (the Tarn, the
+                // Verdon, the Taurus). Only steep reaches cut, so the gorge starts at a knickpoint and grows headward.
+                float cut = want * dry * big;
+                if (wetGorges && (data.rock[g] == Rock.BASIN.ordinal() || data.rock[g] == Rock.OROGEN.ordinal())) {
+                    float steep = smoothstep((groundY[g] - groundY[r] - WET_GORGE_STEEP) / WET_GORGE_STEEP);
+                    // Above its steep reach the gorge shallows a little per cell, as the knickpoint eats back into the plateau
+                    cut = Math.max(cut, Math.min(want, Math.max(want * steep * big, groundY[r] - riverLevel[r] - WET_GORGE_TAPER)));
+                }
+                level = Math.max(below, groundY[g] - cut);
             }
             riverLevel[g] = level;
         }
@@ -1875,7 +2080,7 @@ public final class Terrain {
     /** The ground at unzoomed (x, z) before rivers, lakes and landforms: the planet's surface plus its small hills. */
     private float landAt(double x, double z) {
         double u = warpU(x, z), v = warpV(x, z);
-        float natural = cubic(groundY, u, v), above = Math.max(0, natural - SEA_Y);
+        float natural = cubic(groundY, u, v), above = Math.max(0, Math.min(hillRoom != null ? cubic(hillRoom, u, v) : Float.MAX_VALUE, natural - SEA_Y));
         return natural + detail(x, z) * (5 + 0.06f * above);
     }
 
@@ -1992,6 +2197,24 @@ public final class Terrain {
     }
 
     /** U-shaped cross-section: flat floor, walls steepening up to the untouched ground at t = 1. */
+    /**
+     * Format 78: a fjord's cross-section, t 0 on its axis to 1 at its rim. A real fjord is narrow and deep, a flat
+     * floor between walls that rise straight out of the water (Geirangerfjord: 1.5 km wide under 1,600 m walls), so
+     * the trough is a steep U (t^FJORD_POWER) narrower than a glacial trough on land. Toward its mouth the floor rises
+     * to a rock sill a few blocks under the water (Sognefjord: 100 m over 1,300 inside), where the glacier ended.
+     */
+    private int fjordCut(River fjord, int ground, float t) {
+        float floor = SEA_Y - 2 - Math.min(FJORD_DEPTH_MAX, FJORD_DEPTH + 0.15f * (float) Math.sqrt(fjord.flow));
+        if (fjord.cell >= 0 && data.receiver[fjord.cell] >= 0 && data.metres[data.receiver[fjord.cell]] < 0) // the last reach before the open sea
+            floor = Math.max(floor, SEA_Y - FJORD_SILL - (SEA_Y - FJORD_SILL - floor) * (1 - smoothstep((fjord.t - 0.4f) / 0.4f)));
+        // The walls stand up to the valley's rim, the high land either side: on 32-block cells a fjord's valley is
+        // narrower than a cell, and the land between its axis and the rim was only a smoothed ramp. Past the trough
+        // the wall eases back down onto the land over the rest of the band, so it only ever raises the land there.
+        float rim = Math.max(ground, fjordRim[fjord.cell] + fjord.t * (fjordRim[Math.max(0, data.receiver[fjord.cell])] - fjordRim[fjord.cell]));
+        if (t >= 1) return Math.round(Math.max(ground, rim + (ground - rim) * smoothstep((t - 1) / (FJORD_WALL - 1))));
+        return Math.round(floor + (rim - floor) * (float) Math.pow(t, FJORD_POWER));
+    }
+
     private static int trough(float floor, int ground, float t) {
         return Math.round(floor + (ground - floor) * t * t);
     }
@@ -2276,8 +2499,8 @@ public final class Terrain {
         return cellTemp - Climate.LAPSE_RATE * (Math.max(toMetres(y), 0) - cellMetres);
     }
 
-    /** A temperate, dry-footed land cell well away from the coast and off any volcano, picked by seed. */
-    private int spawnCell() {
+    /** A temperate, dry-footed land cell well away from the coast and off any volcano: the one nearest start, else picked by seed. */
+    private int spawnCell(double[] start) {
         boolean[] volcanic = new boolean[w * h];
         for (Volcano v : data.volcanoes) {
             if (v.gone()) continue;
@@ -2296,7 +2519,14 @@ public final class Terrain {
             boolean pleasant = b == Biome.GRASSLAND || b == Biome.TEMPERATE_FOREST || b == Biome.SAVANNA || b == Biome.TROPICAL_SEASONAL_FOREST;
             if (pleasant && !volcanic[g] && Float.isNaN(data.lakeMetres[g]) && data.flow[g] < Hydrology.RIVER_AREA && inland(g, 3)) good.add(g);
         }
-        return good.isEmpty() ? anyLand : good.get(Math.floorMod(Long.hashCode(seed), good.size()));
+        if (good.isEmpty()) return anyLand;
+        if (start == null) return good.get(Math.floorMod(Long.hashCode(seed), good.size()));
+        // The planet's projection: columns by longitude from -180, equal-area rows (Climate.latitudeAt)
+        double x = (start[1] + 180) / 360 * w - 0.5, y = (1 - Math.sin(Math.toRadians(start[0]))) / 2 * h - 0.5;
+        return good.stream().min(java.util.Comparator.comparingDouble(g -> {
+            double dx = Math.abs(g % w - x);
+            return Math.pow(Math.min(dx, w - dx), 2) + Math.pow(g / w - y, 2);
+        })).get();
     }
 
     private boolean inland(int g, int radius) {

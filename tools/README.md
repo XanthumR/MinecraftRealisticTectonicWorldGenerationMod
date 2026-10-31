@@ -14,13 +14,20 @@ one before trusting it.
 | `rockfall.jsh` | Tiles agree where they overlap (seams 0), tile time, leak edges (0); default spot is seed 777's highest ice-free peak (spawn moves with the climate, so a fixed spot can end up on flat land) |
 | `overshoot.jsh` | Rockfall never piles rubble above its source (0) |
 | `lakeleak.jsh` | Lake water never next to lower dry ground (0); the thorough one |
-| `falls.jsh` | Water spilling onto dry land (baseline 12 column edges since the latest climate changes reshaped seed 777, 4 and 23 before; perched river banks, open) |
+| `falls.jsh` | Water spilling onto dry land (baseline 5 since format 79; 12 column edges since the latest climate changes reshaped seed 777, 4 and 23 before; perched river banks, open) |
 | `pondscan.jsh` | Pond spills (0) |
 | `calderas.jsh` | Caldera lake spills (0) |
 | `biomeedge.jsh` | Desert next to snow (0%) |
 | `tune.sh` | Earth climate vs the real Köppen map in one go (`earthclim.jsh` → `koppen.py` → `kregion.py`); pass `-R-D` knobs. `earthclim.jsh -Dseed=N` + `kdry.py` give a random planet's desert shares, `kshares.py` Earth's per region, `climrow.jsh` rain along one latitude, `climtime.jsh` Huge simulation time, `randmap.jsh` a random planet's map and ice share (`-Dwidth`, `-Dmedium=true`); `-R-Dwidth=2048` on `tune.sh` checks planet size doesn't change the climate |
-| `planethash.jsh` | Hash and time of a whole simulated planet (`-Dwidth`, `-Dmedium=true`, `-Dseed`): simulation refactors must keep it (seed 777: 512 `af54259034d50299`, 1024 `fc0fcdaa6a79cf8a`, 2048 `1a0235dfce965de9` on this branch) |
-| `continents.jsh` | Land share above 500/1000/2000/3000 m, top, rain, volcanoes (`-Dwidth`, `-Dmedium=true`, `-Dseed`): Medium-sized continents should match Medium (>2000 m: Medium seeds 1-6 mean 4.6%, Large medium-continents 5 seeds 5.2%) |
+| `faultblocks.jsh` | Format 75: share of land back-arc extension stretched and the strongest spots in blocks (seed 777: 2.1%, 0.5% over half) |
+| `landforms.jsh` | One example spot of each tectonic landform on a planet (fold, volcano, plateau, trench, arc, ridge, shelf, transform), in blocks and cells (`-Dplanet -Dseed`) |
+| `seafloor.py` | Shaded relief of a planet's cells with the sea drained, like a bathymetry map: `python tools/seafloor.py planet.bin out.png cellX cellY [width] [height]` (`trench` for the deepest sea floor) |
+| `plateaus.py` | High, flat land with steep edges away from volcanoes: `python tools/plateaus.py planet.bin [count]` |
+| `horstspots.jsh` + `annotate.py` | Labels a `uview3d.jsh` render of fault blocks (format 76+): `horstspots.jsh` (same `-Dplanet -Dseed -Dcx -Dcz -Dn`) finds the highest horst and the scarp and graben next to it as image pixels; `python tools/annotate.py in.png out.png "title" spots.txt` draws labelled arrows |
+| `boxspill.jsh` | Water next to lower dry ground in one box (`-Dplanet -Dfmt -Dcx -Dcz -Dn`): spill check for a new feature's own area, run at the old and new format |
+| `wetgorges.jsh` | Format 74: river cells a wet gorge cut over 3 blocks and the deepest spots in blocks, for `uview3d.jsh` (seed 777: 277 cells, deepest 36; 230 dry canyon cells) |
+| `planethash.jsh` | Hash and time of a whole simulated planet (`-Dwidth`, `-Dmedium=true`, `-Dseed`): simulation refactors must keep it (seed 777 since format 79: 512 `87ecc4e3f16c62b7`, 1024 `bcb692e08c51bc5e`, 2048 `43cdb3b3d02d83a`) |
+| `continents.jsh` | Land share above 500/1000/2000/3000 m, top, rain, volcanoes, and a plate map (`-Dwidth`, `-Dmedium=true`, `-Dseed`): Medium-sized continents should match Medium (>2000 m: Medium seeds 1-6 mean 4.6%, Large medium-continents 5 seeds 5.2%) |
 | `stutter.jsh` | Render-thread stalls while 4 worldgen threads pull new tiles: run with and without `-R-XX:+UseZGC` (G1: 10 frames over 10 ms, max ~20 ms; ZGC: 0, max 6.4 ms) |
 | `baselevel.jsh` | Format 46: share of columns base level raises over an area, and by how much (any planet: `-Dplanet -Dseed -Dzoom -Dcx -Dcz -Dn`) |
 | `canada.jsh` | Format 45: snowy taiga, snow cover and frozen water over a lat/lon box of the Earth planet, formats 44 vs 45 |

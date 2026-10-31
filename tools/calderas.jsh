@@ -2,8 +2,9 @@ import com.realtectonics.sim.*;
 // Calderas and cinder cones: list a few, and check each caldera lake and cinder for water spilling.
 var d = PlanetData.generate(777, PlanetSettings.DEFAULT, x -> {}); var t = new Terrain(d, 777, 1, 1, 2);
 var f = Terrain.class.getDeclaredField("conesByCell"); f.setAccessible(true);
+var lists = f.get(t).getClass().getDeclaredField("lists"); lists.setAccessible(true); // a CellMap since the speed work
 var seen = new java.util.HashSet<Object>(); int cal = 0, cin = 0, spills = 0; String calAt = null, cinAt = null;
-for (var list : ((java.util.Map<Integer, java.util.List<?>>) f.get(t)).values()) for (Object c : list) { if (!seen.add(c)) continue;
+for (var list : ((java.util.Map<Integer, java.util.List<?>>) lists.get(f.get(t))).values()) for (Object c : list) { if (!seen.add(c)) continue;
   var rc = c.getClass(); var acc = new java.util.HashMap<String, Object>();
   for (var comp : rc.getRecordComponents()) { var m = comp.getAccessor(); m.setAccessible(true); acc.put(comp.getName(), m.invoke(c)); }
   double cx = (double) acc.get("x"), cz = (double) acc.get("z"); float cr = (float) acc.get("craterRadius");

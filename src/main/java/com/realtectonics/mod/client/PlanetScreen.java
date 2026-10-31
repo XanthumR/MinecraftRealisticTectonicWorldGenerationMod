@@ -2,6 +2,7 @@ package com.realtectonics.mod.client;
 
 import com.realtectonics.mod.RealTectonics;
 import com.realtectonics.mod.TectonicChunkGenerator;
+import com.realtectonics.sim.Drift;
 import com.realtectonics.sim.PlanetData;
 import com.realtectonics.sim.PlanetSettings;
 import com.realtectonics.sim.Terrain;
@@ -26,6 +27,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.function.DoubleConsumer;
+import java.util.stream.IntStream;
 
 /**
  * The "Customize" screen for Tectonic Planet worlds: a live map of the planet the chosen seed and settings make.
@@ -52,6 +54,9 @@ public final class PlanetScreen extends Screen {
     private long seed;
     private Future<?> job;
     private volatile double progress;
+    private volatile int[] drift;    // the plates as they stand while the simulation runs, shown until it finishes
+    private volatile int[] drawn;   // the frame on screen; a new one is coloured only once it is drawn
+    private int driftW, driftH;
     private volatile Result finished;
     private Result shown;
     private Identifier textureId;
@@ -93,11 +98,24 @@ public final class PlanetScreen extends Screen {
 
         addRenderableWidget(new Slider(cx + 5, y, "Rivers", 0.5, 4, settings.riverWidth(), true, false, v -> settings = settings.withRiverWidth((float) v)));
         y += 24;
+        // On Earth, the region spawn lies in; a new run moves the map's spawn marker there
+        CycleButton<Integer> start = CycleButton.<Integer>builder(k -> Component.literal(PlanetSettings.START_NAMES[k]), settings.start())
+                .withValues(IntStream.range(0, PlanetSettings.START_NAMES.length).boxed().toList())
+                .create(cx + 5, y, 150, 20, Component.literal("Start in"), (button, k) -> {
+                    settings = settings.withStart(k);
+                    restartIn = RESTART_DELAY;
+                });
+        start.active = settings.earth();
+        addRenderableWidget(start);
         addRenderableWidget(CycleButton.onOffBuilder(settings.earth()) // Earth: real continents and plates; plates, ocean, volcanoes and steps then do nothing
                 .create(cx - 155, y, 150, 20, Component.literal("Earth"), (button, on) -> {
                     settings = settings.withEarth(on);
+                    start.active = on;
                     restartIn = RESTART_DELAY;
                 }));
+        y += 24;
+        // Tablelands (uplifted flat-lying sedimentary rock) step down in cliffs this many blocks tall, benches between them
+        addRenderableWidget(new Slider(cx - 155, y, "Cliff height", 8, 48, settings.cliffHeight(), false, false, v -> settings = settings.withCliffHeight((int) v)));
         // On Large and Huge: continents, plates and climate belts sized as on Medium, more of them; Plates then counts per Medium's worth
         addRenderableWidget(CycleButton.<Boolean>builder(on -> Component.literal(on ? "Medium-sized" : "Grow with size"), settings.mediumContinents())
                 .withValues(false, true)
@@ -116,18 +134,24 @@ public final class PlanetScreen extends Screen {
     }
 
     private int mapWidth() {
-        return Math.max(100, Math.min(width - 40, (height - 24 - 8 - 6 * 24 - 8) * 2));
+        return Math.max(100, Math.min(width - 40, (height - 24 - 8 - 7 * 24 - 8) * 2));
     }
 
     private void simulate() {
         if (job != null) job.cancel(true);
         restartIn = -1;
         progress = 0;
+        drift = null;
         long s = seed;
         PlanetSettings ps = settings;
         job = worker.submit(() -> {
-            PlanetData d = PlanetData.generate(s, ps, p -> progress = p);
-            Terrain terrain = new Terrain(d, s, ps.mountainScale(), ps.zoom(), ps.riverWidth());
+            PlanetData d = PlanetData.generate(s, ps, p -> progress = p, planet -> {
+                if (drift != null && drift != drawn) return;
+                driftW = planet.w / 2;
+                driftH = planet.h / 2;
+                drift = Drift.of(planet).colors();
+            });
+            Terrain terrain = new Terrain(d, s, ps.mountainScale(), ps.zoom(), ps.riverWidth(), ps.cliffHeight(), ps.startPlace());
             int[] rgb = terrain.mapColors(false);
             int spawn = terrain.spawnCell;
             int land = 0;
@@ -153,11 +177,16 @@ public final class PlanetScreen extends Screen {
         if (restartIn > 0 && --restartIn == 0) simulate();
         Result r = finished;
         if (r != shown && !stale(r)) show(r);
+        else if (stale(shown) && drift != null && drift != drawn) { // the next frame of the plates drifting
+            drawn = drift;
+            textureId = MapScreen.upload("planet_preview", drawn, driftW, driftH, textureId);
+        }
     }
 
     private void show(Result r) {
         textureId = MapScreen.upload("planet_preview", r.rgb, r.data.w, r.data.h, textureId);
         shown = r;
+        drawn = null;
     }
 
     @Override
@@ -165,9 +194,10 @@ public final class PlanetScreen extends Screen {
         super.extractRenderState(g, mouseX, mouseY, partialTick);
         g.centeredText(font, title, width / 2, 8, 0xFFFFFFFF);
         int mapW = mapWidth(), mapH = mapW / 2, x = (width - mapW) / 2, y = 24;
-        if (shown != null) g.blit(RenderPipelines.GUI_TEXTURED, textureId, x, y, 0, 0, mapW, mapH, shown.data.w, shown.data.h, shown.data.w, shown.data.h);
+        if (stale(shown) && drawn != null) g.blit(RenderPipelines.GUI_TEXTURED, textureId, x, y, 0, 0, mapW, mapH, driftW, driftH, driftW, driftH);
+        else if (shown != null) g.blit(RenderPipelines.GUI_TEXTURED, textureId, x, y, 0, 0, mapW, mapH, shown.data.w, shown.data.h, shown.data.w, shown.data.h);
         else g.fill(x, y, x + mapW, y + mapH, 0xFF101820);
-        String status = stale(shown) ? String.format("Simulating planet... %d%%", (int) (progress * 100))
+        String status = stale(shown) ? String.format(progress < PlanetData.PLATES_SHARE ? "Plates drifting... %d%%" : "Rivers, climate and biomes... %d%%", (int) (progress * 100))
                 : String.format("Seed %d  |  %d%% land  |  highest peak %.1f km, y %d  |  + spawn", seed, Math.round(shown.landFraction * 100),
                 shown.peakMetres / 1000, Terrain.peakY(shown.peakMetres, settings.mountainScale()));
         g.centeredText(font, status, width / 2, y + mapH - 12, 0xFFFFFFFF);

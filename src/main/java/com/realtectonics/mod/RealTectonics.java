@@ -52,6 +52,7 @@ public final class RealTectonics implements ModInitializer {
         Registry.register(BuiltInRegistries.CHUNK_GENERATOR, Identifier.fromNamespaceAndPath(MODID, "planet"), TectonicChunkGenerator.CODEC);
         Registry.register(BuiltInRegistries.BIOME_SOURCE, Identifier.fromNamespaceAndPath(MODID, "planet"), TectonicBiomeSource.CODEC);
         MapTeleport.register();
+        TectonicCommand.register();
         ServerLifecycleEvents.SERVER_STARTING.register(RealTectonics::onServerAboutToStart); // before the levels load
         ServerLifecycleEvents.SERVER_STARTED.register(RealTectonics::onServerStarted);
         ServerTickEvents.END_SERVER_TICK.register(server -> {
@@ -102,7 +103,7 @@ public final class RealTectonics implements ModInitializer {
                 }
                 data.save(file);
             }
-            terrain = new Terrain(data, seed, settings.mountainScale(), settings.zoom(), settings.riverWidth());
+            terrain = new Terrain(data, seed, settings.mountainScale(), settings.zoom(), settings.riverWidth(), settings.cliffHeight(), settings.startPlace());
         } catch (IOException e) {
             throw new UncheckedIOException("Could not load or save " + file, e);
         }
