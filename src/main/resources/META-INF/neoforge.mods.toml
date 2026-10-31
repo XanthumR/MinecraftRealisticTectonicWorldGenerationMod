@@ -4,7 +4,7 @@ license = "All Rights Reserved"
 
 [[mods]]
 modId = "realtectonics"
-version = "0.1.0"
+version = "0.1.1"
 displayName = "Realistic Tectonics"
 description = '''A planet shaped by simulated plate tectonics, erosion and climate.'''
 
