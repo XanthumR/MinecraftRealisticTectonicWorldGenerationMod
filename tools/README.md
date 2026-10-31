@@ -19,6 +19,7 @@ one before trusting it.
 | `calderas.jsh` | Caldera lake spills (0) |
 | `biomeedge.jsh` | Desert next to snow (0%) |
 | `tune.sh` | Earth climate vs the real Köppen map in one go (`earthclim.jsh` → `koppen.py` → `kregion.py`); pass `-R-D` knobs. `earthclim.jsh -Dseed=N` + `kdry.py` give a random planet's desert shares, `kshares.py` Earth's per region, `climrow.jsh` rain along one latitude, `climtime.jsh` Huge simulation time, `randmap.jsh` a random planet's map and ice share (`-Dwidth`, `-Dmedium=true`); `-R-Dwidth=2048` on `tune.sh` checks planet size doesn't change the climate |
+| `wetgorges.jsh` | Format 74: river cells a wet gorge cut over 3 blocks and the deepest spots in blocks, for `uview3d.jsh` (seed 777: 277 cells, deepest 36; 230 dry canyon cells) |
 | `planethash.jsh` | Hash and time of a whole simulated planet (`-Dwidth`, `-Dmedium=true`, `-Dseed`): simulation refactors must keep it (seed 777: 512 `fe906f78ae7d1a91`, 1024 `8adc70945f00ea00`, 2048 `35eb05e1cf9b7a8f`) |
 | `continents.jsh` | Land share above 500/1000/2000/3000 m, top, rain, volcanoes, and a plate map (`-Dwidth`, `-Dmedium=true`, `-Dseed`): Medium-sized continents should match Medium (>2000 m: Medium seeds 1-6 mean 4.6%, Large medium-continents 5 seeds 5.2%) |
 | `stutter.jsh` | Render-thread stalls while 4 worldgen threads pull new tiles: run with and without `-R-XX:+UseZGC` (G1: 10 frames over 10 ms, max ~20 ms; ZGC: 0, max 6.4 ms) |

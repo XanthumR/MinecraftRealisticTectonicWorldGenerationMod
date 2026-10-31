@@ -31,6 +31,9 @@ public final class Terrain {
     static final float FALL_RIM = 0.15f;  // of a reach: how far past the lip the banks stay at the upper level
     static final float FALL_CHANCE = 0.4f, FALL_ALWAYS = 20; // share of steep reaches with falls; every reach dropping this far
     static final float GORGE_MIN = 12;   // blocks of drop per reach that make a narrow gorge
+    static final float WET_GORGE_STEEP = 2; // format 74: blocks of drop per cell where a wet upland river starts cutting a gorge into limestone or marble; full at twice that
+    static final float WET_GORGE_BANK = 6;  // format 74: blocks of wall beyond the river's half width and the gorge's depth: walls ~45°, steepest in the middle
+    static final float WET_GORGE_TAPER = 3; // format 74: blocks a wet gorge shallows per cell upstream of its steep reach, instead of ending at one tall fall
     static final float CANYON_HEIGHT = 15, CANYON_RAIN = 400; // dry uplands (blocks above sea, mm) where rivers cut canyons
     static final int CANYON_BENCHES = 4;
     static final float SHORE_BAND = 0.12f;          // land-mask units inland that count as the shore
@@ -240,6 +243,7 @@ public final class Terrain {
     public final boolean undergroundBiomes; // dripstone under limestone, lush caves under wet climates, the deep dark under old high crust (TectonicBiomeSource): format 60
     public final boolean openCaves;       // no cave pillars where the cave is open straight up to the sky (mod.Caves): format 72
     private final boolean lakeOutlets;    // a lake's shore ring leaves the channel of a lower river leaving it open: format 73
+    private final boolean wetGorges;      // steep rivers on wet limestone and marble uplands cut gorges with wooded, craggy walls: format 74
     private final boolean baseFade;       // the base level fades out away from the river instead of ending where the river search does: format 61
     private final boolean wrappedRims;    // a crater floor finds its rim across the planet's seam too (format 42 used the unwrapped offset): format 62
     private final boolean calderaWalls;   // neighbouring cones' shaping fades across a caldera's edge instead of stopping at it: format 63
@@ -359,6 +363,7 @@ public final class Terrain {
         noiseCaves = data.format >= 59;
         openCaves = data.format >= 72;
         lakeOutlets = data.format >= 73;
+        wetGorges = data.format >= 74;
         undergroundBiomes = data.format >= 60;
         baseFade = data.format >= 61;
         wrappedRims = data.format >= 62;
@@ -1201,7 +1206,7 @@ public final class Terrain {
             }
         }
         float bank = 8 + 2 * river.half, drop = river.top - river.bottom;
-        boolean gorge = false, canyon = false;
+        boolean gorge = false, canyon = false, wetGorge = false;
         if (landforms && !inFjord && river != NO_RIVER) {
             // Waterfalls: a steep reach drops at one ledge instead of a block at a time. Its valley floor is lifted above
             // the ledge and cut down below it, fading out across three valley widths, so the pool above stays enclosed.
@@ -1222,8 +1227,10 @@ public final class Terrain {
             }
             gorge = drop >= GORGE_MIN;
             canyon = !gorge && river.incision > 3;
+            wetGorge = canyon && wetGorges && data.precipitation[river.cell] >= CANYON_RAIN;
             if (gorge) bank = 4 + 1.2f * river.half;   // narrow, walls straight up from the water
-            if (canyon) bank = 12 + 2 * river.half + 1.5f * river.incision; // wide, stepping down in benches
+            if (canyon) bank = wetGorge ? WET_GORGE_BANK + river.half + river.incision // steep and even: rain keeps no layered steps
+                    : 12 + 2 * river.half + 1.5f * river.incision; // wide, stepping down in benches
         }
         // Alluvial fans: where a stream leaves its mountain valley for the dry plain it drops its gravel in a cone.
         if (landforms) for (Fan fan : deltasByCellFans.get(cell(iu, iv))) {
@@ -1267,13 +1274,13 @@ public final class Terrain {
             } else { // valley sides ease from just above the water back to the natural slope
                 // The bank starts flush with the water (one block up on planets from before), then eases to the land.
                 // A steep river climbs block by block, so its bank keeps a lip that high, or the water above spills over.
-                float e = river.edge / bank, s = gorge ? (float) Math.sqrt(e) : canyon ? benches(e) : smoothstep(e);
+                float e = river.edge / bank, s = gorge ? (float) Math.sqrt(e) : canyon && !wetGorge ? benches(e) : smoothstep(e);
                 int lip = landforms ? bankRy + Math.round(1.5f * drop / blocksPerCell * zoom) : ry + 1;
                 // Never down from the water: where the land around lies lower, the bank is a flat floodplain at the water.
                 // From format 20 that floodplain is only a levee: past PERCHED_HOLD blocks it eases down to the land.
                 float down = perchedBanks ? smoothstep((river.edge - PERCHED_HOLD) / Math.max(1, bank - PERCHED_HOLD)) : 0;
                 ground = Math.round(lip + (ground >= lip || !massifs ? s : down) * (ground - lip));
-                if (landforms && (gorge || canyon)) cover = Cover.CLIFF;                       // walls that stand as bare rock
+                if (landforms && (gorge || canyon) && (!wetGorge || crag(x, z, e))) cover = Cover.CLIFF; // walls that stand as bare rock
                 else if (landforms && ground <= ry + BANK_RISE && river.edge < BANK_WIDTH) cover = Cover.BANK; // sand, gravel or mud at the water's edge
                 // Oxbow lakes: loops the meandering river cut off, left as crescents of still water on its floodplain.
                 if (low > 0.5f && river.flow > OXBOW_FLOW && river.edge > 3 && river.edge < 0.8f * bank && fine(x, z, 64, 48) > 0.35f
@@ -1613,6 +1620,11 @@ public final class Terrain {
      * Rivers on dry uplands cut canyons: the drier and higher the plateau, the deeper. Levels are then made to never
      * rise downstream, so canyon water always runs downhill and meets the open river at its mouth without a step up.
      */
+    /** Format 74: a wet gorge's wall is wooded, with bare crags where it stands steepest, mid-wall (the Taurus, the Verdon). */
+    private boolean crag(double x, double z, float e) {
+        return fine(x, z, 32, 78) > 4 * Math.abs(e - 0.5f) - 0.6f;
+    }
+
     private void canyons() {
         Integer[] byHeight = new Integer[w * h];
         for (int g = 0; g < byHeight.length; g++) byHeight[g] = g;
@@ -1625,12 +1637,21 @@ public final class Terrain {
             }
             float below = r >= 0 ? Math.max(riverLevel[r], SEA_Y - 1) : groundY[g], level = Math.max(groundY[g], below);
             float rain = data.precipitation[g];
-            if (r >= 0 && data.flow[g] >= CREEK_AREA && groundY[g] > SEA_Y + CANYON_HEIGHT && rain < CANYON_RAIN && data.ice[g] == 0) {
+            if (r >= 0 && data.flow[g] >= CREEK_AREA && groundY[g] > SEA_Y + CANYON_HEIGHT && (rain < CANYON_RAIN || wetGorges) && data.ice[g] == 0) {
                 // Cut in from where the river leaves the plateau: never below the reach downstream, so the canyon
                 // deepens by the river's own fall with every cell upstream, as real canyons grow headward.
                 float want = Math.min(CANYON_MAX, CANYON_CUT * (groundY[g] - SEA_Y - CANYON_HEIGHT));
                 float dry = smoothstep((CANYON_RAIN - rain) / 150), big = smoothstep(data.flow[g] / (4 * CREEK_AREA));
-                level = Math.max(below, groundY[g] - want * dry * big);
+                // From format 74 rain does not stop the cut on limestone and marble: water sinks into them instead of
+                // wearing the slopes back, so a river steepened by uplift cuts a gorge whose walls stand (the Tarn, the
+                // Verdon, the Taurus). Only steep reaches cut, so the gorge starts at a knickpoint and grows headward.
+                float cut = want * dry * big;
+                if (wetGorges && (data.rock[g] == Rock.BASIN.ordinal() || data.rock[g] == Rock.OROGEN.ordinal())) {
+                    float steep = smoothstep((groundY[g] - groundY[r] - WET_GORGE_STEEP) / WET_GORGE_STEEP);
+                    // Above its steep reach the gorge shallows a little per cell, as the knickpoint eats back into the plateau
+                    cut = Math.max(cut, Math.min(want, Math.max(want * steep * big, groundY[r] - riverLevel[r] - WET_GORGE_TAPER)));
+                }
+                level = Math.max(below, groundY[g] - cut);
             }
             riverLevel[g] = level;
         }
