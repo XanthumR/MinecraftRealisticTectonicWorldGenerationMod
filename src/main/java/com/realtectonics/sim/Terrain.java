@@ -77,6 +77,10 @@ public final class Terrain {
     static final float FAULT_SCARP = 10, FAULT_SCARP_WIDTH = 2; // blocks a fast fault's scarp stands (150 m, a pressure ridge); unzoomed blocks its face spans
     static final float HORST = 16;          // format 75: blocks a fault block of fully stretched crust stands over the basins beside it (240 m)
     static final float HORST_SPACING = 192; // format 75: unzoomed blocks from one fault block to the next across the trench's strike
+    static final float TALL_HORST = 40;     // format 76: blocks a fault block stands where the crust is stretched the most (600 m); HORST where it is barely
+    static final float HORST_HALF = 0.2f, SCARP_BLOCKS = 15; // format 76: share of the fault spacing the flat top spans either side of its middle; unzoomed blocks the stepped scarp beyond it spans
+    static final int SCARP_STEPS = 3;       // format 76: faults a block's edge breaks into, each a cliff and a bench
+    static final float GRABEN_FILL = 2, GRABEN_FILL_MAX = 8; // format 76: blocks under the smoothed land the basin's sediment floor lies; deepest hollow it fills
     static final int SPRING_TILT = 3;     // blocks the ground round a hot spring may rise above its pool
     static final float CRATER_OWN = 4;    // blocks above its volcano's own cone the ground may stand and still be cut by its crater
     static final float ICE_EDGE = 12;     // blocks below the land the ice surface sinks at cells without ice, so glaciers thin to their edges
@@ -247,6 +251,9 @@ public final class Terrain {
     private final boolean lakeOutlets;    // a lake's shore ring leaves the channel of a lower river leaving it open: format 73
     private final boolean wetGorges;      // steep rivers on wet limestone and marble uplands cut gorges with wooded, craggy walls: format 74
     private final boolean faultBlocks;    // flat-topped fault blocks behind trenches that roll back (data.backArc): format 75
+    private final boolean grabens;        // fault blocks taller where stretched more, stepped scarps, flat basin floors, rock layers lifted with the block: format 76
+    private final float[] arcDist;        // format 76: data.backArcDist smoothed more, so faults bend round where the nearest trench changes instead of meeting in a crease
+    static final int ARC_DIST_SMOOTHING = 6; // format 76: blur passes over it (cells)
     private final boolean baseFade;       // the base level fades out away from the river instead of ending where the river search does: format 61
     private final boolean wrappedRims;    // a crater floor finds its rim across the planet's seam too (format 42 used the unwrapped offset): format 62
     private final boolean calderaWalls;   // neighbouring cones' shaping fades across a caldera's edge instead of stopping at it: format 63
@@ -368,6 +375,9 @@ public final class Terrain {
         lakeOutlets = data.format >= 73;
         wetGorges = data.format >= 74;
         faultBlocks = data.format >= 75;
+        grabens = data.format >= 76;
+        arcDist = grabens ? data.backArcDist.clone() : null;
+        for (int pass = 0; grabens && pass < ARC_DIST_SMOOTHING; pass++) blur3x3(arcDist);
         undergroundBiomes = data.format >= 60;
         baseFade = data.format >= 61;
         wrappedRims = data.format >= 62;
@@ -1040,7 +1050,7 @@ public final class Terrain {
         }
         if (gullies && !simGullies && natural > SEA_Y + 20) natural += gullies(x, z, u, v, natural - SEA_Y) * (1 - ridgeline * ridgeline * ridgeline); // none on the crests; from 33 water cuts them (relaxTile)
         if (faults) natural += faultScarp(x, z, u, v, natural);
-        if (faultBlocks) natural += faultBlocks(x, z, u, v, natural);
+        if (faultBlocks) natural += grabens ? grabens(x, z, u, v, natural) : faultBlocks(x, z, u, v, natural);
         natural = softCeiling(natural);
         // From format 22 volcano summits are sharpened here, as part of the land, so rivers cut through them later
         // instead of being buried by them.
@@ -1099,6 +1109,51 @@ public final class Terrain {
         float lift = HORST * Math.min(1, 2 * stretch) * along * onLand;
         float top = Math.max(natural + 0.5f * lift, cubic(rangeY, u, v) + lift);
         return Math.min(top - natural, 2.5f * lift) * smoothstep((t - 0.1f) / 0.25f);
+    }
+
+    /**
+     * Format 76: the fault blocks as the textbook horst and graben. A block stands TALL_HORST where the crust is
+     * stretched the most; its edge breaks down in SCARP_STEPS faults, each a cliff and a bench; the basin between two
+     * blocks fills with sediment washed off them into a level floor (hollows up to GRABEN_FILL_MAX deep); and the rock
+     * layers rise with the block (faultUplift, in column()), so a scarp shows them offset. Still only raises the ground.
+     */
+    private float grabens(double x, double z, double u, double v, float natural) {
+        float stretch = cubic(data.backArc, u, v);
+        if (stretch < 0.02f || natural < SEA_Y + 2) return 0;
+        float onLand = smoothstep((natural - SEA_Y - 2) / 8) * (1 - smoothstep(cubic(lakes, u, v) / 0.3f));
+        float[] b = faultBlock(x, z, u, v, stretch);
+        float lift = b[0] * onLand, up = lift * b[1], floor = cubic(rangeY, u, v) - GRABEN_FILL;
+        float target = floor + up + GRABEN_FILL * b[1]; // the basin's floor, stepping up to the smoothed land lifted
+        return Math.clamp(target - natural, 0.5f * up, 2 * up + GRABEN_FILL_MAX * lift / TALL_HORST);
+    }
+
+    /** Format 76: blocks the fault block at this column was lifted (0 in a basin); its rock layers go up as far. */
+    private float faultUplift(double x, double z, double u, double v) {
+        float stretch = cubic(data.backArc, u, v);
+        if (stretch < 0.02f) return 0;
+        float[] b = faultBlock(x, z, u, v, stretch);
+        return b[0] * b[1];
+    }
+
+    /**
+     * Format 76: {the block's full lift here, ending at a cross-fault where its fault dies out; 1 on its top, stepping
+     * down across the scarp to 0 in the basin}. The scarp spans SCARP_BLOCKS whatever the spacing, which widens where
+     * the distance to the trench changes slowly, or a far block's scarp came out a gentle ramp. Where a block ends is
+     * picked on its middle line (the column stepped back across the strike to it), so a block stands or ends whole,
+     * never cut lengthwise into a sliver ridge.
+     */
+    private float[] faultBlock(double x, double z, double u, double v, float stretch) {
+        float dist = cubic(arcDist, u, v), e = 0.5f;
+        float du = cubic(arcDist, u + e, v) - cubic(arcDist, u - e, v), dv = cubic(arcDist, u, v + e) - cubic(arcDist, u, v - e);
+        float grad = (float) hyp(du, dv) / (2 * e);
+        double phase = dist * BLOCKS_PER_CELL / HORST_SPACING + 0.25 * fine(x, z, 512, 79);
+        float scarp = Math.max(0.02f, SCARP_BLOCKS * grad / HORST_SPACING); // in phase: blocks times phase per block
+        float off = (float) Math.abs(phase - Math.rint(phase)), k = Math.clamp((off - HORST_HALF) / scarp, 0, 1) * SCARP_STEPS;
+        float step = (float) Math.floor(k), down = Math.min(1, (step + smoothstep((k - step - 0.5f) / 0.5f)) / SCARP_STEPS);
+        float lift = (HORST + (TALL_HORST - HORST) * smoothstep((stretch - 0.5f) / 0.4f)) * Math.min(1, 2 * stretch);
+        // Blocks back to the middle line; none where the distance peaks between two trenches, as there it flips side to side
+        double back = (phase - Math.rint(phase)) * HORST_SPACING / Math.max(grad, 0.05f) * smoothstep((grad - 0.1f) / 0.3f), len = Math.max(hyp(du, dv), 1e-6);
+        return new float[]{lift * smoothstep((fine(x - back * du / len, z - back * dv / len, 512, 80) + 0.2f) / 0.1f), 1 - down};
     }
 
     /**
@@ -1558,6 +1613,7 @@ public final class Terrain {
         // Rock layers bend gently under plains and fold hard inside mountain ranges, where plates collided.
         int fold = Math.round(fine(x, z, 512, 5) * (12 + 0.1f * Math.max(0, ground - SEA_Y)) + fine(x, z, 64, 6) * 4);
         if (foldedStrata && folds) fold += strataFold(x, z, u, v);
+        if (grabens) fold -= Math.round(faultUplift(x, z, u, v)); // a raised block carries its rock layers up with it
         // Province edges interfinger over a few dozen blocks instead of following the warped cell outline.
         Rock rock = Rock.of(data.rock[cell((int) Math.round(u + 0.4 * noise(x, z, 32, 8)), (int) Math.round(v + 0.4 * noise(x, z, 32, 9)))]);
         // From format 38 a river waters its banks from below: through a desert it runs in a green strip (the Nile), wider

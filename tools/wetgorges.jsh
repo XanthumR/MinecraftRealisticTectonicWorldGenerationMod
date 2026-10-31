@@ -1,17 +1,17 @@
 import com.realtectonics.sim.*;
 // Format 74 wet gorges: river cells whose level a wet upland gorge lowered, how deep, and the deepest spots in blocks
-// (for uview3d.jsh). -Dplanet=file (default out/p777_cur.bin, made from seed 777 if missing).
+// (for uview3d.jsh). -Dseed (the world seed: it picks the spawn, so the coordinates), -Dplanet=file (default out/p777_cur.bin, made from seed 777 if missing).
 var file = java.nio.file.Path.of(System.getProperty("planet", "out/p777_cur.bin"));
 PlanetData d;
 if (java.nio.file.Files.exists(file)) d = PlanetData.load(file); else { d = PlanetData.generate(777, PlanetSettings.DEFAULT, x -> {}); d.save(file); }
 float[] level(PlanetData p, int fmt) throws Exception {
     p.format = fmt;
-    var t = new Terrain(p, 777, 1, 1, 2);
+    var t = new Terrain(p, Long.getLong("seed", 777), 1, 1, 2);
     var f = Terrain.class.getDeclaredField("riverLevel"); f.setAccessible(true);
     return (float[]) f.get(t);
 }
 float[] before = level(d, 73), after = level(d, 74);
-var t = new Terrain(d, 777, 1, 1, 2);
+var t = new Terrain(d, Long.getLong("seed", 777), 1, 1, 2);
 var fg = Terrain.class.getDeclaredField("groundY"); fg.setAccessible(true); float[] gy = (float[]) fg.get(t);
 var ox = Terrain.class.getDeclaredField("originX"); ox.setAccessible(true); var oy = Terrain.class.getDeclaredField("originY"); oy.setAccessible(true);
 int originX = (int) ox.get(t), originY = (int) oy.get(t);

@@ -1,10 +1,10 @@
 import com.realtectonics.sim.*;
 // Format 75 fault blocks: share of land back-arc extension stretched, and the most stretched spots in blocks (for
-// uview3d.jsh / hillshade.jsh with -Dfmt=74 and 75). -Dplanet=file (default out/p777_75.bin, made from seed 777 if missing).
+// uview3d.jsh / hillshade.jsh with -Dfmt=74 and 75). -Dseed (the world seed: it picks the spawn), -Dplanet=file (default out/p777_75.bin, made from seed 777 if missing).
 var file = java.nio.file.Path.of(System.getProperty("planet", "out/p777_75.bin"));
 PlanetData d;
 if (java.nio.file.Files.exists(file)) d = PlanetData.load(file); else { d = PlanetData.generate(777, PlanetSettings.DEFAULT, x -> {}); d.save(file); }
-var t = new Terrain(d, 777, 1, 1, 2);
+var t = new Terrain(d, Long.getLong("seed", 777), 1, 1, 2);
 var ox = Terrain.class.getDeclaredField("originX"); ox.setAccessible(true); var oy = Terrain.class.getDeclaredField("originY"); oy.setAccessible(true);
 int originX = (int) ox.get(t), originY = (int) oy.get(t);
 int land = 0, some = 0, strong = 0;
