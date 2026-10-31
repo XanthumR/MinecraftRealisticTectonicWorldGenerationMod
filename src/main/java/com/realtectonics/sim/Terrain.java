@@ -272,6 +272,7 @@ public final class Terrain {
     private final float fjordArea;        // format 78: FJORD_AREA, before Hydrology.GLACIER_AREA (fjords themselves come from the planet file)
     private final boolean sunkAtolls;     // atolls only where the land at their volcano is under the sea: format 79
     private final boolean volcanoKinds;   // supervolcano calderas (from the planet file) and lava domes: format 81
+    private final boolean lakeRivers;     // no river drawn along a reach from one lake cell to another: the lake is the water there: format 82
     private final float[] hillRoom;       // format 80: blocks of height the land's hills and massifs grow from; on calm rock only its height over the lowest ground within BASE_REACH, blurred; null before
     private final float[] fjordRim;       // format 78: per fjord cell, the highest land within a cell of it (the valley's rim), at most FJORD_RIM_MAX over the sea; null before
     private final float[] sediment;       // format 77: the sedimentary platform (Rock.BASIN) blurred, 0-1 per cell
@@ -415,6 +416,7 @@ public final class Terrain {
         fjordArea = data.format >= 78 ? FJORD_AREA : Hydrology.GLACIER_AREA;
         sunkAtolls = data.format >= 79;
         volcanoKinds = data.format >= 81;
+        lakeRivers = data.format >= 82;
         for (int pass = 0; grabens && pass < ARC_DIST_SMOOTHING; pass++) blur3x3(arcDist);
         undergroundBiomes = data.format >= 60;
         baseFade = data.format >= 61;
@@ -2248,6 +2250,9 @@ public final class Terrain {
                 if (cy < 0 || cy >= h) continue;
                 int c = cell(iu + dx, cy), r = data.receiver[c];
                 if (r < 0 || data.metres[c] < 0 || data.ice[c] < minIce || data.flow[c] <= minFlow) continue;
+                // From format 82 a reach inside a lake is no river: drawn at the lake's surface, its banks stood up as
+                // ridges a few blocks under the water of a deep lake (a caldera's, x -62 z 2825, seed 3747905650848365592).
+                if (lakeRivers && minIce == 0 && !Float.isNaN(lakeY[c]) && !Float.isNaN(lakeY[r])) continue;
                 double au = iu + dx, bu = au + wrap(r % w - c % w), bv = r / w;
                 double su = bu - au, sv = bv - cy;
                 // A fjord's mouth runs on one more cell out to sea: its first sea cell can be a pocket the smooth coastline closes.
