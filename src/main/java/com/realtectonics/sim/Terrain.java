@@ -71,6 +71,8 @@ public final class Terrain {
     static final float CALDERA_RADIUS = 0.16f, CALDERA_DEPTH = 70, CALDERA_MIN = 40, CALDERA_LAKE = 0.35f; // of the footprint; blocks at most; smallest volcano; lake this far below the rim, of the depth
     static final int CALDERA_AGE = 120, CINDER_AGE = 60;  // shields older than this have worn their caldera away; younger than this still sprout cinder cones
     static final float CINDER_RADIUS = 22, CINDER_STEEP = 0.5f; // blocks across a cinder cone's base, half; height per block of radius
+    static final float DOME_SHARE = 0.4f;   // of arc volcanoes with a lava dome in their crater: format 81
+    static final float DOME_RADIUS = 0.5f, DOME_RISE = 1, DOME_LUMPS = 3; // of the crater's radius and depth (both varied); blocks of blocky rubble on top
     static final float LAKE_SHORE_RISE = 24; // blocks the ground may rise across a lake's shore band, from the water up
     static final float LAKE_CUT_MAX = 48;    // blocks above its surface beyond which a lake leaves the land standing (format 30)
     static final float ICE_FRONT = 4;        // blocks: height of a glacier's calving front above a lake (format 31)
@@ -269,6 +271,7 @@ public final class Terrain {
     private final boolean tablelands;     // uplifted flat-lying sedimentary rock as benches and cliffs, mesas and buttes: format 77
     private final float fjordArea;        // format 78: FJORD_AREA, before Hydrology.GLACIER_AREA (fjords themselves come from the planet file)
     private final boolean sunkAtolls;     // atolls only where the land at their volcano is under the sea: format 79
+    private final boolean volcanoKinds;   // supervolcano calderas (from the planet file) and lava domes: format 81
     private final float[] hillRoom;       // format 80: blocks of height the land's hills and massifs grow from; on calm rock only its height over the lowest ground within BASE_REACH, blurred; null before
     private final float[] fjordRim;       // format 78: per fjord cell, the highest land within a cell of it (the valley's rim), at most FJORD_RIM_MAX over the sea; null before
     private final float[] sediment;       // format 77: the sedimentary platform (Rock.BASIN) blurred, 0-1 per cell
@@ -311,7 +314,7 @@ public final class Terrain {
      * sharpen the summit and cut the crater. Planets saved before that (legacy) get the whole cone per block.
      */
     private record Cone(Volcano v, double x, double z, float radius, float craterRadius, float craterDepth, float height, boolean legacy,
-                        boolean caldera, float[][] cinders, boolean collapsed, float rim, float lobes, float baseY, float kept) {
+                        boolean caldera, float[][] cinders, boolean collapsed, float rim, float lobes, float baseY, float kept, float dome, float domeTop) {
         double reach() { // lobes: from format 36 a cone reaches further down some sides
             return legacy ? radius : SUMMIT * radius * lobes;
         }
@@ -411,6 +414,7 @@ public final class Terrain {
         tablelands = data.format >= 77;
         fjordArea = data.format >= 78 ? FJORD_AREA : Hydrology.GLACIER_AREA;
         sunkAtolls = data.format >= 79;
+        volcanoKinds = data.format >= 81;
         for (int pass = 0; grabens && pass < ARC_DIST_SMOOTHING; pass++) blur3x3(arcDist);
         undergroundBiomes = data.format >= 60;
         baseFade = data.format >= 61;
@@ -556,7 +560,7 @@ public final class Terrain {
             int key = Math.round(v.u() * 7919) ^ Math.round(v.v() * 104729);
             // Calderas: an old volcano's summit, emptied by its last great eruption, falls in: a wide flat-floored basin
             // under steep walls, filled by a lake (Crater Lake). Extinct arc volcanoes and middle-aged shields.
-            boolean collapsed = simCalderas && v.caldera(); // from format 22 the simulation built it, lake and all
+            boolean collapsed = simCalderas && (v.caldera() || volcanoKinds && v.supervolcano()); // from format 22 the simulation built it, lake and all
             boolean caldera = calderas && !simCalderas && height >= CALDERA_MIN && !v.active()
                     && hash01(key) < (v.hotspot() ? (v.age() < CALDERA_AGE ? CALDERA_SHIELDS : 0) : CALDERA_SHARE);
             float craterRadius = collapsed ? 0 : caldera ? CALDERA_RADIUS * radius : radius * (v.hotspot() ? 0.08f : 0.06f) + 5;
@@ -577,8 +581,10 @@ public final class Terrain {
             float baseY = toY(placed.baseMetres()), topY = toY(placed.surfaceMetres(0));
             float kept = smoothCones && !legacy ? Math.clamp((groundY[cell(Math.round(v.u()), Math.round(v.v()))] - baseY) / Math.max(1, topY - baseY), 0, 1) : 1;
             rim = baseY + kept * (rim - baseY);
+            // Lava domes: an arc volcano's sticky lava piles up over the vent instead of flowing away (Mount St Helens).
+            float dome = volcanoKinds && !v.hotspot() && !collapsed && hash01(key + 40) < DOME_SHARE ? craterRadius * DOME_RADIUS * (0.8f + 0.4f * hash01(key + 41)) : 0;
             Cone cone = new Cone(placed, cx, cz, radius, craterRadius, craterDepth, height, legacy, caldera, cinders, collapsed, softCeiling(rim),
-                    variedVolcanoes ? Volcano.LOBE_MAX : 1, baseY, kept);
+                    variedVolcanoes ? Volcano.LOBE_MAX : 1, baseY, kept, dome, softCeiling(rim) - craterDepth * (1 - DOME_RISE * (0.8f + 0.6f * hash01(key + 42))));
             // Listed over the whole footprint once lava flows and hot springs reach past the summit.
             int reach = (int) Math.ceil((landforms ? cone.radius * cone.lobes : cone.reach()) / BLOCKS_PER_CELL) + 1, cu = Math.round(v.u()), cv = Math.round(v.v());
             for (int dy = -reach; dy <= reach; dy++)
@@ -1534,6 +1540,7 @@ public final class Terrain {
                 float s = coneY(c, d) + wobble, fade = c.legacy ? 1 : smoothstep((float) ((c.reach() - d) / (0.1 * c.radius)));
                 if (s > ground) ground = Math.round(ground + fade * (s - ground));
             }
+            ground = Math.max(ground, domeY(c, x, z));
             for (float[] k : c.cinders) { // each a steep cone of ash with a crater, standing on the flank; rivers keep their course
                 double e = hyp(wrapBlocks(x - k[0]), z - k[1]), cr = 0.3 * k[2];
                 if (e >= k[2] || river.edge < 4 || water != Column.NO_WATER) continue;
@@ -1579,7 +1586,7 @@ public final class Terrain {
                         }
                     }
             }
-            if (d < c.craterRadius && ground < pool && !drowned(c)) {
+            if (d < c.craterRadius && ground < pool && !drowned(c) && !(c.dome > 0 && c.v.active())) { // a dome plugs its vent: no lava lake
                 crater = true;
                 if (c.v.active() && pool > SEA_Y) lava = (int) pool;
                 else water = Math.max(water, (int) pool);
@@ -1965,6 +1972,17 @@ public final class Terrain {
         return data.summerRain[c] > MONSOON_BRAID || melt > 0.3f && melt < 0.7f;
     }
 
+    /**
+     * From format 81: a lava dome's top at this column, or Integer.MIN_VALUE off it. Lava too sticky to flow piled up
+     * over the vent: a flat top of blocky rubble, falling off in steep sides that rockfall turns into talus.
+     */
+    private int domeY(Cone c, double x, double z) {
+        double e = hyp(wrapBlocks(x - c.x), z - c.z) / c.dome;
+        if (!(e < 1)) return Integer.MIN_VALUE; // NaN when there is no dome
+        float q = (float) (e * e), floor = c.rim - c.craterDepth;
+        return Math.round(floor + (c.domeTop - floor) * (1 - q * q * q) + DOME_LUMPS * fine(x, z, 8, 93) * (1 - q));
+    }
+
     /** From format 30: a summit standing in a lake keeps no crater; a sealed bowl there would ring the lake with a wall. */
     private boolean drowned(Cone c) {
         return solidShores && lakes[cell(Math.round(c.v.u()), Math.round(c.v.v()))] > 0.02f;
@@ -1975,7 +1993,7 @@ public final class Terrain {
     private float insideCaldera(double x, double z, double wall) {
         float in = 0;
         for (Cone c : conesNear(x, z)) {
-            double past = c.collapsed ? 1.2 * Volcano.CALDERA_SHARE * c.radius - hyp(wrapBlocks(x - c.x), z - c.z) : 0;
+            double past = c.collapsed ? 1.2 * (volcanoKinds && c.v.supervolcano() ? c.v.superBlocks() : Volcano.CALDERA_SHARE * c.radius) - hyp(wrapBlocks(x - c.x), z - c.z) : 0;
             if (past > 0) in = Math.max(in, wall > 0 ? smoothstep((float) (past / wall)) : 1);
         }
         return in;
