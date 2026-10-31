@@ -29,6 +29,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.function.DoubleConsumer;
+import java.util.stream.IntStream;
 
 /**
  * The "Customize" screen for Tectonic Planet worlds: a live map of the planet the chosen seed and settings make.
@@ -103,9 +104,20 @@ public final class PlanetScreen extends Screen {
 
         addRenderableWidget(new Slider(cx + 5, y, "Rivers", 0.5, 4, settings.riverWidth(), true, false, v -> settings = settings.withRiverWidth((float) v)));
         y += 24;
+        // On Earth, the region spawn lies in; a new run moves the map's spawn marker there
+        CycleButton<Integer> start = CycleButton.<Integer>builder(k -> Component.literal(PlanetSettings.START_NAMES[k]))
+                .withValues(IntStream.range(0, PlanetSettings.START_NAMES.length).boxed().toList())
+                .withInitialValue(settings.start())
+                .create(cx + 5, y, 150, 20, Component.literal("Start in"), (button, k) -> {
+                    settings = settings.withStart(k);
+                    restartIn = RESTART_DELAY;
+                });
+        start.active = settings.earth();
+        addRenderableWidget(start);
         addRenderableWidget(CycleButton.onOffBuilder(settings.earth()) // Earth: real continents and plates; plates, ocean, volcanoes and steps then do nothing
                 .create(cx - 155, y, 150, 20, Component.literal("Earth"), (button, on) -> {
                     settings = settings.withEarth(on);
+                    start.active = on;
                     restartIn = RESTART_DELAY;
                 }));
         y += 24;
@@ -147,7 +159,7 @@ public final class PlanetScreen extends Screen {
                 driftH = planet.h / 2;
                 drift = Drift.of(planet).colors();
             });
-            Terrain terrain = new Terrain(d, s, ps.mountainScale(), ps.zoom(), ps.riverWidth(), ps.cliffHeight());
+            Terrain terrain = new Terrain(d, s, ps.mountainScale(), ps.zoom(), ps.riverWidth(), ps.cliffHeight(), ps.startPlace());
             int[] rgb = terrain.mapColors(false);
             int spawn = terrain.spawnCell;
             int land = 0;

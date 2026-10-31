@@ -338,6 +338,11 @@ public final class Terrain {
 
     /** cliffHeight: blocks from one tableland bench to the next, the height of each of its cliffs (format 77). */
     public Terrain(PlanetData data, long seed, float mountainScale, int zoom, float riverWidth, float cliffHeight) {
+        this(data, seed, mountainScale, zoom, riverWidth, cliffHeight, null);
+    }
+
+    /** start: latitude and longitude spawn goes nearest to (PlanetSettings.startPlace), or null for anywhere by seed. */
+    public Terrain(PlanetData data, long seed, float mountainScale, int zoom, float riverWidth, float cliffHeight, double[] start) {
         this.riverWidth = riverWidth;
         tableStep = cliffHeight;
         this.data = data;
@@ -485,7 +490,7 @@ public final class Terrain {
             int r = data.receiver[c];
             if (r >= 0 && (mainDonor[r] < 0 || data.flow[c] > data.flow[mainDonor[r]])) mainDonor[r] = c;
         }
-        spawnCell = spawnCell();
+        spawnCell = spawnCell(start);
         originX = spawnCell % w;
         originY = spawnCell / w;
         riverLevel = groundY.clone();
@@ -2494,8 +2499,8 @@ public final class Terrain {
         return cellTemp - Climate.LAPSE_RATE * (Math.max(toMetres(y), 0) - cellMetres);
     }
 
-    /** A temperate, dry-footed land cell well away from the coast and off any volcano, picked by seed. */
-    private int spawnCell() {
+    /** A temperate, dry-footed land cell well away from the coast and off any volcano: the one nearest start, else picked by seed. */
+    private int spawnCell(double[] start) {
         boolean[] volcanic = new boolean[w * h];
         for (Volcano v : data.volcanoes) {
             if (v.gone()) continue;
@@ -2514,7 +2519,14 @@ public final class Terrain {
             boolean pleasant = b == Biome.GRASSLAND || b == Biome.TEMPERATE_FOREST || b == Biome.SAVANNA || b == Biome.TROPICAL_SEASONAL_FOREST;
             if (pleasant && !volcanic[g] && Float.isNaN(data.lakeMetres[g]) && data.flow[g] < Hydrology.RIVER_AREA && inland(g, 3)) good.add(g);
         }
-        return good.isEmpty() ? anyLand : good.get(Math.floorMod(Long.hashCode(seed), good.size()));
+        if (good.isEmpty()) return anyLand;
+        if (start == null) return good.get(Math.floorMod(Long.hashCode(seed), good.size()));
+        // The planet's projection: columns by longitude from -180, equal-area rows (Climate.latitudeAt)
+        double x = (start[1] + 180) / 360 * w - 0.5, y = (1 - Math.sin(Math.toRadians(start[0]))) / 2 * h - 0.5;
+        return good.stream().min(java.util.Comparator.comparingDouble(g -> {
+            double dx = Math.abs(g % w - x);
+            return Math.pow(Math.min(dx, w - dx), 2) + Math.pow(g / w - y, 2);
+        })).get();
     }
 
     private boolean inland(int g, int radius) {

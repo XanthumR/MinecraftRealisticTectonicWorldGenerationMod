@@ -28,7 +28,9 @@ gameplay** and play-tests in the client themselves.
   - `EarthData`, `Planet.earth()`: the "Earth" planet (`PlanetSettings.earth`, world type "Tectonic Earth"): real elevation, PB2002 plates
     and boundary steps, Natural Earth lakes, from `src/main/resources/realtectonics/earth/` (built by `tools/earthdata.py`, in the
     planet's equal-area projection). No plate motion; Hydrology skips its made-up shaping, fills fake hollows (`drainEarth`) and
-    erodes 3 passes. jshell needs `build/resources/main` on the class path for it (`tools/earth.jsh`).
+    erodes 3 passes. jshell needs `build/resources/main` on the class path for it (`tools/earth.jsh`). "Start in"
+    (`PlanetSettings.start`, `START_PLACES`) puts spawn at the pleasant cell nearest a real place (Europe: Greenwich, so X runs
+    with real longitude); 0 = by seed, what worlds from before the setting decode to, so no format bump.
   - `Terrain`: per-block columns (`Column`: ground/water/lava/ice/biome/fold/volcanic/rock/cover).
     `surface()` is the land before rivers; `column()` adds rivers, lakes, cones, ponds and the rest.
     `relaxedColumn()` (what the game uses, format 29+) runs block-scale rockfall over cached 256-block tiles (RELAX_TILE; output is identical for any tile size, `tools/relaxhash.jsh` proves it) (computed once, rows in parallel, early stop); seamless

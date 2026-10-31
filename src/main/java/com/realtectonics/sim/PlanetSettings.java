@@ -11,16 +11,21 @@ package com.realtectonics.sim;
  * mediumContinents: on a planet bigger than Medium, continents, plates and climate stay the size they are on Medium and
  * there are more of them (plates counts them per Medium planet's worth of surface), instead of the same few grown big.
  * cliffHeight: blocks from one tableland bench to the next, so the height of each of its cliffs (format 77 worlds).
+ * start: on Earth, the region spawn (block 0, 0) lies in, an index into START_NAMES; 0 picks anywhere by seed, as worlds
+ * from before the setting did.
  */
 public record PlanetSettings(int width, int plates, float oceanFraction, float mountainScale, int zoom, float volcanoes,
-                             int steps, float riverWidth, boolean earth, boolean mediumContinents, float cliffHeight) {
+                             int steps, float riverWidth, boolean earth, boolean mediumContinents, float cliffHeight, int start) {
     public static final float CLIFF_HEIGHT = 24; // Terrain.TABLE_STEP
+    public static final String[] START_NAMES = {"Anywhere", "Europe", "North America", "South America", "Africa", "Asia", "Australia"};
+    static final double[][] START_PLACES = {null, {51.5, 0}, {39, -98}, {-15, -55}, {5, 20}, {35, 105}, {-30, 145}}; // latitude, longitude: Greenwich, so X runs with real longitude; Kansas; Mato Grosso; the Congo; China; New South Wales
+    static final int EUROPE = 1; // new worlds start here: the old default dropped players on any continent
     public static final PlanetSettings DEFAULT = new PlanetSettings(1024, 14, 0.7f, 1, 1, 1, 300, 2, false);
     static final int MEDIUM = 1024; // cells round a Medium planet
     public static final int MAX_PLATES = 256; // plates are saved as one byte per cell
 
     public PlanetSettings(int width, int plates, float oceanFraction, float mountainScale, int zoom, float volcanoes, int steps, float riverWidth, boolean earth) {
-        this(width, plates, oceanFraction, mountainScale, zoom, volcanoes, steps, riverWidth, earth, false, CLIFF_HEIGHT);
+        this(width, plates, oceanFraction, mountainScale, zoom, volcanoes, steps, riverWidth, earth, false, CLIFF_HEIGHT, EUROPE);
     }
 
     public PlanetSettings(int width, int plates, float oceanFraction, float mountainScale, int zoom, float volcanoes, int steps, float riverWidth) {
@@ -50,46 +55,55 @@ public record PlanetSettings(int width, int plates, float oceanFraction, float m
     }
 
     public PlanetSettings withWidth(int v) {
-        return new PlanetSettings(v, plates, oceanFraction, mountainScale, zoom, volcanoes, steps, riverWidth, earth, mediumContinents, cliffHeight);
+        return new PlanetSettings(v, plates, oceanFraction, mountainScale, zoom, volcanoes, steps, riverWidth, earth, mediumContinents, cliffHeight, start);
     }
 
     public PlanetSettings withPlates(int v) {
-        return new PlanetSettings(width, v, oceanFraction, mountainScale, zoom, volcanoes, steps, riverWidth, earth, mediumContinents, cliffHeight);
+        return new PlanetSettings(width, v, oceanFraction, mountainScale, zoom, volcanoes, steps, riverWidth, earth, mediumContinents, cliffHeight, start);
     }
 
     public PlanetSettings withOceanFraction(float v) {
-        return new PlanetSettings(width, plates, v, mountainScale, zoom, volcanoes, steps, riverWidth, earth, mediumContinents, cliffHeight);
+        return new PlanetSettings(width, plates, v, mountainScale, zoom, volcanoes, steps, riverWidth, earth, mediumContinents, cliffHeight, start);
     }
 
     public PlanetSettings withMountainScale(float v) {
-        return new PlanetSettings(width, plates, oceanFraction, v, zoom, volcanoes, steps, riverWidth, earth, mediumContinents, cliffHeight);
+        return new PlanetSettings(width, plates, oceanFraction, v, zoom, volcanoes, steps, riverWidth, earth, mediumContinents, cliffHeight, start);
     }
 
     public PlanetSettings withZoom(int v) {
-        return new PlanetSettings(width, plates, oceanFraction, mountainScale, v, volcanoes, steps, riverWidth, earth, mediumContinents, cliffHeight);
+        return new PlanetSettings(width, plates, oceanFraction, mountainScale, v, volcanoes, steps, riverWidth, earth, mediumContinents, cliffHeight, start);
     }
 
     public PlanetSettings withVolcanoes(float v) {
-        return new PlanetSettings(width, plates, oceanFraction, mountainScale, zoom, v, steps, riverWidth, earth, mediumContinents, cliffHeight);
+        return new PlanetSettings(width, plates, oceanFraction, mountainScale, zoom, v, steps, riverWidth, earth, mediumContinents, cliffHeight, start);
     }
 
     public PlanetSettings withSteps(int v) {
-        return new PlanetSettings(width, plates, oceanFraction, mountainScale, zoom, volcanoes, v, riverWidth, earth, mediumContinents, cliffHeight);
+        return new PlanetSettings(width, plates, oceanFraction, mountainScale, zoom, volcanoes, v, riverWidth, earth, mediumContinents, cliffHeight, start);
     }
 
     public PlanetSettings withEarth(boolean v) {
-        return new PlanetSettings(width, plates, oceanFraction, mountainScale, zoom, volcanoes, steps, riverWidth, v, mediumContinents, cliffHeight);
+        return new PlanetSettings(width, plates, oceanFraction, mountainScale, zoom, volcanoes, steps, riverWidth, v, mediumContinents, cliffHeight, start);
     }
 
     public PlanetSettings withMediumContinents(boolean v) {
-        return new PlanetSettings(width, plates, oceanFraction, mountainScale, zoom, volcanoes, steps, riverWidth, earth, v, cliffHeight);
+        return new PlanetSettings(width, plates, oceanFraction, mountainScale, zoom, volcanoes, steps, riverWidth, earth, v, cliffHeight, start);
     }
 
     public PlanetSettings withCliffHeight(float v) {
-        return new PlanetSettings(width, plates, oceanFraction, mountainScale, zoom, volcanoes, steps, riverWidth, earth, mediumContinents, v);
+        return new PlanetSettings(width, plates, oceanFraction, mountainScale, zoom, volcanoes, steps, riverWidth, earth, mediumContinents, v, start);
+    }
+
+    /** Where on the planet spawn goes, as latitude and longitude; null: anywhere (and always on a simulated planet). */
+    public double[] startPlace() {
+        return earth ? START_PLACES[start] : null;
+    }
+
+    public PlanetSettings withStart(int v) {
+        return new PlanetSettings(width, plates, oceanFraction, mountainScale, zoom, volcanoes, steps, riverWidth, earth, mediumContinents, cliffHeight, v);
     }
 
     public PlanetSettings withRiverWidth(float v) {
-        return new PlanetSettings(width, plates, oceanFraction, mountainScale, zoom, volcanoes, steps, v, earth, mediumContinents, cliffHeight);
+        return new PlanetSettings(width, plates, oceanFraction, mountainScale, zoom, volcanoes, steps, v, earth, mediumContinents, cliffHeight, start);
     }
 }

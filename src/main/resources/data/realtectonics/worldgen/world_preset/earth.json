@@ -15,7 +15,8 @@
           "ocean_fraction": 0.7,
           "mountain_scale": 1.0,
           "river_width": 2.0,
-          "earth": true
+          "earth": true,
+          "start": 1
         }
       }
     },
