@@ -104,25 +104,28 @@ class TerrainTest {
         assertTrue(waterPixels > 20, "the map should show some rivers and lakes");
         assertTrue(confirmed >= waterPixels * 0.9, "map water missing in the game: " + confirmed + " of " + waterPixels);
 
-        // Volcanoes survive saving, and an erupting one holds its lava lake inside the crater.
+        // Volcanoes survive saving, and erupting ones hold their lava lakes inside the crater (from format 81 a lava dome
+        // plugs some vents, so the first with lava counts).
         assertEquals(data.volcanoes, loaded.volcanoes);
-        Volcano erupting = loaded.volcanoes.stream().filter(Volcano::active).findFirst().orElseThrow();
-        int[] summit = t.blockOf((int) erupting.u() + (int) erupting.v() * loaded.w);
         int r = 120, side = 2 * r + 1, lava = 0;
-        Terrain.Column[] crater = new Terrain.Column[side * side];
-        for (int z = 0; z < side; z++)
-            for (int x = 0; x < side; x++) crater[x + z * side] = t.column(summit[0] + x - r, summit[1] + z - r);
-        for (int z = 1; z < side - 1; z++)
-            for (int x = 1; x < side - 1; x++) {
-                Terrain.Column c = crater[x + z * side];
-                if (c.lava() == Terrain.Column.NO_WATER) continue;
-                lava++;
-                assertTrue(c.lava() > c.ground());
-                for (int k : new int[]{-1, 1, -side, side}) {
-                    Terrain.Column o = crater[x + z * side + k];
-                    assertTrue(Math.max(o.ground(), Math.max(o.water(), o.lava())) >= c.lava(), "lava would spill at " + (summit[0] + x - r) + "," + (summit[1] + z - r));
+        for (Volcano erupting : loaded.volcanoes.stream().filter(Volcano::active).limit(5).toList()) {
+            if (lava > 0) break;
+            int[] summit = t.blockOf((int) erupting.u() + (int) erupting.v() * loaded.w);
+            Terrain.Column[] crater = new Terrain.Column[side * side];
+            for (int z = 0; z < side; z++)
+                for (int x = 0; x < side; x++) crater[x + z * side] = t.column(summit[0] + x - r, summit[1] + z - r);
+            for (int z = 1; z < side - 1; z++)
+                for (int x = 1; x < side - 1; x++) {
+                    Terrain.Column c = crater[x + z * side];
+                    if (c.lava() == Terrain.Column.NO_WATER) continue;
+                    lava++;
+                    assertTrue(c.lava() > c.ground());
+                    for (int k : new int[]{-1, 1, -side, side}) {
+                        Terrain.Column o = crater[x + z * side + k];
+                        assertTrue(Math.max(o.ground(), Math.max(o.water(), o.lava())) >= c.lava(), "lava would spill at " + (summit[0] + x - r) + "," + (summit[1] + z - r));
+                    }
                 }
-            }
+        }
         assertTrue(lava > 0, "an erupting volcano should have a lava lake");
     }
 }

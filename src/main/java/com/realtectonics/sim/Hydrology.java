@@ -30,6 +30,13 @@ public final class Hydrology {
     static final float VOLCANO_YOUTH = 0.33f;   // share of the erosion the volcanoes stand through: they are young beside the land
     static final float CALDERA_SINK = 0.4f;     // of a collapsing volcano's height its summit sinks by, at most Volcano.CALDERA_DEPTH
     static final float CONE_BLEND = 400;        // metres over which two overlapping volcanoes' slopes round into each other
+    static final float SUPER_DEPTH = 600;       // metres a supervolcano's caldera block sinks (Toba's lake is 500 m deep)
+    static final float SUPER_FILL = 0.5f;       // share of the sunken block's relief that ignimbrite and lake sediments level out
+    static final float SUPER_FLOOR = 150;       // metres over the sea a caldera floor stays at least, so it holds a lake, not an inlet
+    static final float SUPER_RIM = 250;         // metres the ignimbrite sheets raise the land at the rim, thinning out to SUPER_APRON radii
+    static final float SUPER_APRON = 1.8f;      // of the caldera radius: where the ignimbrite sheets end
+    static final float SUPER_WALL = 0.25f;      // of the radius: the wall from floor to rim
+    static final float SUPER_DOME = 1.2f, SUPER_DOME_R = 0.45f, SUPER_DOME_OFF = 0.2f; // resurgent dome: of the depth it rises; its radius and offset, of the caldera's (Samosir)
     // Continental shelves: the drowned rim of a continent, shallow out to the shelf break, then the slope to the deep floor.
     static final float SHELF_MIN = 1, SHELF_MAX = 6; // cells wide on quiet (passive) coasts, by broad noise
     static final float ACTIVE_SHELF = 0.5f;     // cells: next to a trench the floor drops away almost at once (Chile, Japan)
@@ -206,6 +213,7 @@ public final class Hydrology {
         float[] cones = new float[n];
         Arrays.fill(cones, Float.NaN);
         for (Volcano placed : volcanoes) {
+            if (placed.supervolcano()) continue; // its magma pooled underground: no cone
             int cu = (int) placed.u(), cv = (int) placed.v();
             float radius = Volcano.LOBE_MAX * placed.radiusBlocks() / Terrain.BLOCKS_PER_CELL;
             for (int dy = -(int) radius; dy <= radius; dy++)
@@ -233,7 +241,8 @@ public final class Hydrology {
      */
     private void collapseCalderas(float[] beforeCones) {
         for (Volcano v : volcanoes) {
-            if (!v.caldera()) continue;
+            if (v.supervolcano()) collapseSuper(v);
+            if (v.supervolcano() || !v.caldera()) continue;
             int cu = (int) v.u(), cv = (int) v.v();
             float r = Volcano.CALDERA_SHARE * v.radiusBlocks() / Terrain.BLOCKS_PER_CELL;
             float summit = Planet.metres(elevation[cu + cv * w]), rim = summit;
@@ -255,6 +264,35 @@ public final class Hydrology {
                     elevation[g] = Math.max(Math.max(beforeCones[g], floor), Math.min(elevation[g], sunk));
                 }
         }
+    }
+
+    /**
+     * A supervolcano's caldera: the roof over its emptied chamber, dozens of kilometres across, fell in as one block.
+     * The block sinks SUPER_DEPTH like a piston under steep walls, its hills and valleys with it, half levelled by the
+     * ignimbrite and lake sediments that filled it: everywhere lower than it was, so the rim closes all round, but a
+     * level floor cut into a range beside it left walls kilometres high. The ignimbrite it blew out lies as sheets thickest at the rim, and magma rising again under the floor
+     * lifted a resurgent dome off its middle, so a lake markLakes fills in it is a ring round an island (Toba and
+     * Samosir, Yellowstone's two domes); in a dry climate it is a dry basin (the Puna's calderas).
+     */
+    private void collapseSuper(Volcano v) {
+        int cu = (int) v.u(), cv = (int) v.v();
+        float r = v.superBlocks() / Terrain.BLOCKS_PER_CELL, reach = SUPER_APRON * r, low = Float.MAX_VALUE;
+        for (int dy = -(int) r; dy <= r; dy++) // the lowest land the block took down with it: the fill levels toward it
+            for (int dx = -(int) r; dx <= r; dx++)
+                if (cv + dy >= 0 && cv + dy < h && Math.hypot(dx, dy) < r) low = Math.min(low, Planet.metres(elevation[Math.floorMod(cu + dx, w) + (cv + dy) * w]));
+        double a = v.domeAngle(), ox = SUPER_DOME_OFF * r * Math.cos(a), oy = SUPER_DOME_OFF * r * Math.sin(a);
+        for (int dy = -(int) reach; dy <= reach; dy++)
+            for (int dx = -(int) reach; dx <= reach; dx++) {
+                double d = Math.hypot(dx, dy) / r;
+                if (d >= SUPER_APRON || cv + dy < 0 || cv + dy >= h) continue;
+                int g = Math.floorMod(cu + dx, w) + (cv + dy) * w;
+                float sheet = (float) (d < 1 ? 1 : 1 - (d - 1) / (SUPER_APRON - 1)), land = Planet.metres(elevation[g]) + SUPER_RIM * sheet * sheet;
+                if (d >= 1) { elevation[g] = Planet.fromMetres(land); continue; }
+                float t = (float) Math.clamp((d - 1 + SUPER_WALL) / SUPER_WALL, 0, 1), wall = t * t * (3 - 2 * t);
+                double e = Math.hypot(dx - ox, dy - oy) / (SUPER_DOME_R * r);
+                float floor = Math.max(SUPER_FLOOR, land - SUPER_DEPTH - SUPER_FILL * (land - low)) + (e < 1 ? SUPER_DOME * SUPER_DEPTH * (float) (1 - e * e) : 0);
+                elevation[g] = Planet.fromMetres(floor + (land - floor) * wall);
+            }
     }
 
     private Hydrology(int w, int h, float[] rainMm, float[] warmth) {

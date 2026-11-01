@@ -62,6 +62,32 @@ public record Volcano(float u, float v, boolean hotspot, int age, float size, fl
         return hotspot ? age < CALDERA_AGE && roll < CALDERA_SHIELDS : roll < size;
     }
 
+    static final float SUPER_HOT_BASE = 300;     // metres: a hotspot standing on ground this high rises under a continent
+    static final float SUPER_ARC_BASE = 800;     // metres: an arc on ground this high stands on crust thick enough to melt (the Andes, Toba)
+    static final float SUPER_HOTSPOTS = 0.6f, SUPER_ARCS = 0.35f; // share of those whose silicic magma pooled into a supervolcano
+    static final int SUPER_AGE = 100;            // steps after which a continental hotspot's caldera is buried and worn away
+    static final float SUPER_CELLS = 8, SUPER_SPREAD = 4; // caldera radius in cells, plus up to this many more: 3x a cone's
+
+    /**
+     * From format 81: whether this is a supervolcano. A hotspot or arc rising under thick continental crust melts the
+     * crust itself into sticky, gas-rich magma that pools in a vast chamber instead of reaching the surface: no tall
+     * cone, one great eruption, and the roof over the chamber falls in (Yellowstone, Toba). Never while still erupting.
+     */
+    public boolean supervolcano() {
+        if (active() || !(baseMetres > SUPER_HOT_BASE)) return false; // NaN: planets from before volcano bases
+        return hotspot ? age < SUPER_AGE && roll(9) < SUPER_HOTSPOTS : baseMetres > SUPER_ARC_BASE && roll(9) < SUPER_ARCS;
+    }
+
+    /** A supervolcano's caldera radius in blocks, at the default zoom. */
+    public float superBlocks() {
+        return (SUPER_CELLS + SUPER_SPREAD * (float) roll(10)) * Terrain.BLOCKS_PER_CELL;
+    }
+
+    /** Radians: which way a supervolcano's resurgent dome sits off its middle. */
+    double domeAngle() {
+        return 2 * Math.PI * roll(11);
+    }
+
     static final float LOBE_MAX = 1.9f;     // varied cones: widest reach over the mean footprint (wide volcano, longest lobe)
     static final float SCAR_SHARE = 0.3f;   // varied cones: share of arc volcanoes whose flank slid away (Mount St Helens, Stromboli)
     static final float SCAR_DEPTH = 0.35f;  // of the height a collapse scar takes off the summit

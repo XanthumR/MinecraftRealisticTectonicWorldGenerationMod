@@ -17,7 +17,7 @@ var g = img.createGraphics(); g.setColor(new java.awt.Color(0xbcd4e6)); g.fillRe
 for (int sum = 0; sum < 2 * n - 1; sum++)
   for (int x = Math.max(0, sum - n + 1); x <= Math.min(n - 1, sum); x++) {
     int z = sum - x; var c = cs[x + z * n];
-    int top = Math.max(Math.max(c.ground(), c.water()), c.ice());
+    int top = Math.max(Math.max(Math.max(c.ground(), c.water()), c.ice()), c.lava());
     int base = lo - 2;
     int sx = (x - z + n) * s, sy = (x + z) * s / 2 + (int) ((hi - top) * s * vx) + 10, hgt = (int) ((top - base) * s * vx);
     int rgb = c.water() >= c.ground() && c.water() != Terrain.Column.NO_WATER ? 0x3c78dc : c.ice() != Terrain.Column.NO_WATER ? (c.cover() == Terrain.Cover.MORAINE ? 0x4a4a50 : c.cover() == Terrain.Cover.BARE_ICE ? 0x8cc4e8 : 0xdcf0ff)
@@ -27,6 +27,7 @@ for (int sum = 0; sum < 2 * n - 1; sum++)
       if (sl >= 3) rgb = 0x8a8580;
     }
     if (c.cover() == Terrain.Cover.SCREE) rgb = 0xd8b070;
+    if (c.lava() > c.ground()) rgb = 0xff5a14;
     if (c.cover() == Terrain.Cover.SALT) rgb = 0xf4f4f0;
     g.setColor(new java.awt.Color(rgb)); g.fillRect(sx, sy, 2 * s, s);
     int r = rgb >> 16 & 255, gg = rgb >> 8 & 255, b = rgb & 255;
