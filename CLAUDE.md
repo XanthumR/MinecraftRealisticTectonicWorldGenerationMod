@@ -57,9 +57,9 @@ come from `markLakes`.
 - Every change to how terrain looks goes behind a **format flag**:
   - Bump `PlanetData.FORMAT`, add a line to its comment, and add a `private final boolean x; // ...: format N` field in `Terrain`.
   - Set it as `x = data.format >= N` and gate the new code on it. Old worlds keep their look and get no chunk seams.
-  - Current format: **82** (no river drawn across a lake; 81 supervolcano calderas and lava domes; 80 calm rock as hilly as its valleys are deep; 79 atolls only on sunken land, calderas within 1,200 m of their rim; 78 fjords, 77 tablelands, 76 horsts and grabens, 75 the first fault blocks). Formats 65-71 (rain thinning with height, young rifts, side valleys, ores by province) were
+  - Current format: **83** (craters cut from the land round them; 82 no river drawn across a lake; 81 supervolcano calderas and lava domes; 80 calm rock as hilly as its valleys are deep; 79 atolls only on sunken land, calderas within 1,200 m of their rim; 78 fjords, 77 tablelands, 76 horsts and grabens, 75 the first fault blocks). Formats 65-71 (rain thinning with height, young rifts, side valleys, ores by province) were
     tried and reverted with git at the user's request: planets saved at 65-71 no longer load (`load()` refuses them);
-    the next format is 83. `docs/FORMATS.md` says what each format added and why (most fix a bug the user saw);
+    the next format is 84. `docs/FORMATS.md` says what each format added and why (most fix a bug the user saw);
     read its "recurring causes" before fixing an unnatural spot: stamps, on/off thresholds, unstable updates, tile seams.
 - Noise and grid spacings must be **powers of two** (the planet wraps; the seam test fails otherwise).
 - Water must never spill onto lower dry ground. Waterfalls dropping into lower water are fine. Every new water or terrain feature gets a spill check.
@@ -79,7 +79,7 @@ come from `markLakes`.
   (terrain area time and an output hash that must not change in pure speed work). Profile with `jcmd <pid> JFR.start` or the
   `jdk.jfr.Recording` API inside jshell (the jshell JVM is killed, so -XX:StartFlightRecording never dumps).
 - Compile: `./gradlew compileJava -q`. Tests: `./gradlew test -q`. Jar: `./gradlew build -q`.
-- **`Terrain.column(double, double, boolean)` is ~7,750 bytes of bytecode (lake shores moved to `lakeShore`, output unchanged); the JIT never compiles a method over 8,000**
+- **`Terrain.column(double, double, boolean)` is ~7,630 bytes of bytecode (lake shores moved to `lakeShore`, crater pits to `pit`); the JIT never compiles a method over 8,000**
   (HotSpot's DontCompileHugeMethods), and the generator would then run interpreted, many times slower. Put new features in
   their own methods; check the size with `javap -c -p` (largest offset) after adding to it.
 - Speed work must keep `relaxhash.jsh` hashes: format 46 `acba683bd8c9b0cb` (`-Dfmt=46`), the file's own format
