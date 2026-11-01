@@ -274,6 +274,7 @@ public final class Terrain {
     private final boolean volcanoKinds;   // supervolcano calderas (from the planet file) and lava domes: format 81
     private final boolean lakeRivers;     // no river drawn along a reach from one lake cell to another: the lake is the water there: format 82
     private final boolean realCraters;    // a crater's rim is the land round it, its pit a bowl meeting that land: format 83
+    private final boolean summitFloor;    // an erupting summit buries relief only down to the planet's own surface: format 84
     private final float[] hillRoom;       // format 80: blocks of height the land's hills and massifs grow from; on calm rock only its height over the lowest ground within BASE_REACH, blurred; null before
     private final float[] fjordRim;       // format 78: per fjord cell, the highest land within a cell of it (the valley's rim), at most FJORD_RIM_MAX over the sea; null before
     private final float[] sediment;       // format 77: the sedimentary platform (Rock.BASIN) blurred, 0-1 per cell
@@ -420,6 +421,7 @@ public final class Terrain {
         volcanoKinds = data.format >= 81;
         lakeRivers = data.format >= 82;
         realCraters = data.format >= 83;
+        summitFloor = data.format >= 84;
         for (int pass = 0; grabens && pass < ARC_DIST_SMOOTHING; pass++) blur3x3(arcDist);
         undergroundBiomes = data.format >= 60;
         baseFade = data.format >= 61;
@@ -1144,7 +1146,14 @@ public final class Terrain {
             if (s > natural) natural += fade * (s - natural);
             // From format 45 an erupting volcano's summit buries the range it grew on: its lava covers any ridge of
             // the massif round the crater, which stood over the rim and left the crater without a lava lake.
-            else if (activeSummits && c.v.active()) natural -= open * (natural - s) * (1 - smoothstep((float) ((d - 2 * c.craterRadius) / (0.3 * c.radius))));
+            else if (activeSummits && c.v.active()) {
+                float buried = natural - open * (natural - s) * (1 - smoothstep((float) ((d - 2 * c.craterRadius) / (0.3 * c.radius))));
+                // From format 84 only the relief standing over the planet's own surface: the cone is scaled by the land
+                // left at its summit cell, and where that is a caldera's floor (hotspot volcanoes stacked on a plate that
+                // stood still) it lay 30 blocks under the caldera's rim and flanks, which were dug down to it; the lake's
+                // shore ring stood over them as a wall 45 blocks high (x -35640 z 6043, seed -7257683127594653914).
+                natural = summitFloor ? Math.max(buried, Math.min(natural, smooth)) : buried;
+            }
         }
         return natural;
     }
