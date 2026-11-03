@@ -117,6 +117,11 @@ public final class Terrain {
     static final float MAAR_CREST = 0.4f;   // of the radius: how far out from the edge the ring climbs to its crest (a cliff there left posts by the water)
     static final float MAAR_WALL = 0.6f;    // blocks per block: higher land round the crater is cut back this steep, which rock stands
     static final float MAAR_LEVEL = 0.8f;   // of the radius: the most the land round a maar may rise over its lowest point; steeper sites get none
+    static final int CHIMNEY_GRID = 8;      // format 90: real blocks between fairy chimney sites (each may hold one)
+    static final float CHIMNEY_SHARE = 0.35f; // of the sites on a tuff slope that hold a chimney
+    static final float CHIMNEY_SLOPE = 0.3f; // blocks per block the ground must fall at a site: chimneys stand on valley sides, not the plain
+    static final float CHIMNEY_BELOW = 30, CHIMNEY_DEEP = 600; // metres under the ignimbrite plain's level a site must lie: in a valley cut into it, not through it
+    static final float CHIMNEY_RADIUS = 1.3f, CHIMNEY_HEIGHT = 6; // real blocks: the thinnest's radius and the shortest's height; up to twice that
     static final int ICE_BLUR = 8;        // blocks: half-width of each of the two box means the rock is blurred by under glacier ice (format 56)
     static final float ICE_SUMMER_MAX = 15; // °C: summers this warm melt any glacier tongue that reaches them
     static final float LAKE_SILL = 0.25f;   // cells: width of the rock sill between two lakes at different levels
@@ -185,7 +190,7 @@ public final class Terrain {
     static final float CANYON_CUT = 0.8f, CANYON_MAX = 50; // canyon depth: share of the height above CANYON_HEIGHT; deepest cut // straight pieces per river reach when measuring distance to its curve
     static final double BULGE = 0.5;   // cells a reach's curve can stray from the straight line between its cells
     /** What lies on top of the ground where it is not soil, sand or bare rock. */
-    public enum Cover { NONE, SALT, GRAVEL, SINTER, SPRING, CLIFF, BANK, SCREE, POND, BARE_ICE, MORAINE, ASH, IGNIMBRITE } // BARE_ICE, MORAINE on glacier ice, from format 40; ASH from 86; IGNIMBRITE (soil over tuff) from 89
+    public enum Cover { NONE, SALT, GRAVEL, SINTER, SPRING, CLIFF, BANK, SCREE, POND, BARE_ICE, MORAINE, ASH, IGNIMBRITE, CHIMNEY, CHIMNEY_CAP } // BARE_ICE, MORAINE on glacier ice, from format 40; ASH from 86; IGNIMBRITE (soil over tuff) from 89; CHIMNEY, CHIMNEY_CAP (bare tuff, its hard cap) from 90
 
     public static final int WATER_COLOR = 0x1e46b4, LAVA_COLOR = 0xff5a14, GLACIER_COLOR = 0xc8e6f5;
     static final float GLACIER_MELT = -1;      // °C annual mean at a valley floor: colder, and today's glaciers still fill it
@@ -308,6 +313,8 @@ public final class Terrain {
     private final boolean maars;          // explosion craters with tuff rings and lakes round young volcanoes in wet country: format 88
     private final boolean ignimbrites;    // tuff under the soil of supervolcanoes' ignimbrite plains (sim): format 89
     private final float[] tuff;           // format 89: 0..1 per cell, how much of it a supervolcano's ignimbrite covers
+    private final boolean chimneys;       // fairy chimneys on the ignimbrite's slopes; ash and tuff ground gullied and screed like bare ground: format 90
+    private final List<float[]> sheets = new ArrayList<>(); // format 90: each supervolcano's ignimbrite {u, v (cells), radius (blocks), mean land round it (metres)}
     private final float[] bay, silt;      // format 37: land mask blurred wide (above 0.5 in a bay); river sand reaching the coast
     private final java.util.concurrent.ConcurrentHashMap<Long, java.util.concurrent.CompletableFuture<Column[]>> relaxedTiles = new java.util.concurrent.ConcurrentHashMap<>();
     private final java.util.concurrent.ConcurrentLinkedQueue<Long> tileOrder = new java.util.concurrent.ConcurrentLinkedQueue<>();
@@ -455,6 +462,7 @@ public final class Terrain {
         hotCraters = data.format >= 87;
         maars = data.format >= 88;
         ignimbrites = data.format >= 89;
+        chimneys = data.format >= 90;
         coneStyle = blownFlanks ? Volcano.BLOWN : smoothCones ? Volcano.SMOOTH_SCARS : variedVolcanoes ? Volcano.VARIED : Volcano.ROUND;
         snowLine = data.format >= 18;
         iceCapBelow = data.format >= 8 ? Biome.ICE_CAP_BELOW : Biome.OLD_ICE_CAP_BELOW;
@@ -493,6 +501,19 @@ public final class Terrain {
                     if (Math.hypot(dx, dy) < r && v.v() + dy >= 0 && v.v() + dy < h) tuff[cell((int) v.u() + dx, (int) v.v() + dy)] = 1;
         }
         for (int pass = 0; ignimbrites && pass < 2; pass++) blur3x3(tuff);
+        for (Volcano v : chimneys ? data.volcanoes : List.<Volcano>of()) { // the plain's level, as Hydrology.ignimbrite laid it (near enough)
+            if (!v.supervolcano()) continue;
+            float r = v.superBlocks() / BLOCKS_PER_CELL, sum = 0;
+            int k = 0;
+            for (int dy = -(int) (Hydrology.SUPER_APRON * r); dy <= Hydrology.SUPER_APRON * r; dy++)
+                for (int dx = -(int) (Hydrology.SUPER_APRON * r); dx <= Hydrology.SUPER_APRON * r; dx++) {
+                    double e = Math.hypot(dx, dy) / r;
+                    if (e < 1 || e >= Hydrology.SUPER_APRON || v.v() + dy < 0 || v.v() + dy >= h) continue;
+                    sum += data.metres[cell((int) v.u() + dx, (int) v.v() + dy)];
+                    k++;
+                }
+            sheets.add(new float[]{v.u(), v.v(), v.superBlocks(), k > 0 ? sum / k : v.baseMetres()});
+        }
         // A high plain on an old craton or a sedimentary platform is not rugged for being high: no plates squeeze it, and
         // rivers can cut it only as deep as the low ground they drain to (the High Plains, the Highveld). Mountain belts,
         // arcs and volcanic land keep relief that grows with height.
@@ -941,11 +962,59 @@ public final class Terrain {
                 int i = x + m + (z + m) * n;
                 Column c = cs[i];
                 int ground = Math.round(hgt[i]), ice = bed == null || c.ice() == Column.NO_WATER ? c.ice() : Math.min(c.ice(), Math.round(bed[i] + ICE_DRAPE));
-                Cover cover = c.cover() == Cover.NONE && fallen[i] > SCREE_FALLEN ? Cover.SCREE : c.cover();
+                Cover cover = bare(c.cover()) && fallen[i] > SCREE_FALLEN ? Cover.SCREE : c.cover();
+                int spire = chimneys && c.water() == Column.NO_WATER && c.lava() == Column.NO_WATER && c.ice() == Column.NO_WATER ? chimney(cs, n, x0 - m, z0 - m, x0 + x, z0 + z) : 0;
+                if (spire > 0) {
+                    ground += spire >> 1;
+                    cover = (spire & 1) != 0 ? Cover.CHIMNEY_CAP : Cover.CHIMNEY;
+                }
                 tile[x + z * RELAX_TILE] = ground == c.ground() && cover == c.cover() && ice == c.ice() ? c
                         : new Column(ground, c.water(), c.lava(), ice > ground ? ice : Column.NO_WATER, c.biome(), c.fold(), c.volcanic(), c.rock(), cover);
             }
         return tile;
+    }
+
+    /** Ground gullies cut and rubble marks as scree: uncovered, and from format 90 ash and tuff too (they had neither). */
+    private boolean bare(Cover c) {
+        return c == Cover.NONE || chimneys && (c == Cover.ASH || c == Cover.IGNIMBRITE);
+    }
+
+    /**
+     * From format 90: a fairy chimney at real block (x, z), as (blocks it rises << 1) | 1 on its cap, or 0. Rain cut the
+     * soft tuff of an ignimbrite down its valley sides and left columns standing where a harder bed capped them
+     * (Cappadocia). Laid after rockfall, which would crumble anything this thin, and only on dry ground, so it opens
+     * nothing. Each CHIMNEY_GRID site decides at its middle from the plain columns (cs, which every tile computes alike),
+     * so a chimney is whole or absent and tiles agree where they meet. (wx, wz): real block of cs[0].
+     */
+    /** Format 90: metres the ignimbrite plain stands at here (the land round its caldera plus the sheet), or NaN off it. */
+    private float plainLevel(double x, double z) {
+        float level = Float.NaN;
+        for (float[] s : sheets) {
+            double e = hyp(wrapBlocks(x - (s[0] - originX) * BLOCKS_PER_CELL), z - (s[1] - originY) * BLOCKS_PER_CELL) / s[2];
+            if (e < Hydrology.SUPER_APRON) level = Math.max(Float.isNaN(level) ? -Float.MAX_VALUE : level, s[3] + Hydrology.SUPER_RIM * (float) Math.min(1, 1 - (e - 1) / (Hydrology.SUPER_APRON - 1)));
+        }
+        return level;
+    }
+
+    private int chimney(Column[] cs, int n, int wx, int wz, int x, int z) {
+        int gx = Math.floorDiv(x, CHIMNEY_GRID), gz = Math.floorDiv(z, CHIMNEY_GRID), cells = span * zoom / CHIMNEY_GRID, best = 0;
+        for (int dz = -1; dz <= 1; dz++)
+            for (int dx = -1; dx <= 1; dx++) {
+                int key = Math.floorMod(gx + dx, cells) * 4513 + (gz + dz) * 70139 + 29; // repeats around the planet
+                if (hash01(key) > CHIMNEY_SHARE) continue;
+                int px = (gx + dx) * CHIMNEY_GRID + 2 + (int) (4 * hash01(key + 1)), pz = (gz + dz) * CHIMNEY_GRID + 2 + (int) (4 * hash01(key + 2));
+                float r = CHIMNEY_RADIUS * (1 + hash01(key + 3)), d = (float) Math.hypot(x - px, z - pz);
+                int i = px - wx + (pz - wz) * n;
+                if (d >= r || px - wx < 1 || pz - wz < 1 || px - wx >= n - 1 || pz - wz >= n - 1 || cs[i].cover() != Cover.IGNIMBRITE) continue;
+                float slope = 0.5f * Math.max(Math.abs(cs[i + 1].ground() - cs[i - 1].ground()), Math.abs(cs[i + n].ground() - cs[i - n].ground()));
+                float below = plainLevel(px / (double) zoom, pz / (double) zoom) - toMetres(cs[i].ground());
+                // Only in valleys cut into the plain: the ridges it buried thinly have no thick tuff to carve.
+                if (slope < CHIMNEY_SLOPE || !(below > CHIMNEY_BELOW && below < CHIMNEY_DEEP)) continue;
+                float q = d / r;
+                int up = Math.round(CHIMNEY_HEIGHT * (1 + hash01(key + 4)) * (1 - q * q * q * q)); // a column, rounded off at the top
+                best = Math.max(best, up << 1 | (q < 0.5f ? 1 : 0));
+            }
+        return best;
     }
 
     /**
@@ -1020,7 +1089,7 @@ public final class Terrain {
         }
         float[] cut = new float[n * n], out = hgt.clone();
         for (int i = 0; i < n * n; i++)
-            if (receiver[i] >= 0 && !fixed[i] && cs[i].cover() == Cover.NONE)
+            if (receiver[i] >= 0 && !fixed[i] && bare(cs[i].cover()))
                 cut[i] = Math.min(GULLY_DEPTH, variedShores // from 37 weak runoff cuts nothing (no pits a block deep), and waves keep beaches smooth
                         ? Math.max(0, GULLY_POWER * (float) Math.sqrt(area[i]) * slope[i] - GULLY_THRESHOLD) * smoothstep((hgt[i] - SEA_Y - 2) / 4)
                         : GULLY_POWER * (float) Math.sqrt(area[i]) * slope[i]);
@@ -1030,7 +1099,7 @@ public final class Terrain {
         }
         float[] wide = cut.clone(); // water cuts a line; its banks slump in, so the groove is a few blocks wide
         for (int i = n + 1; i < n * n - n - 1; i++) {
-            if (fixed[i] || cs[i].cover() != Cover.NONE) continue;
+            if (fixed[i] || !bare(cs[i].cover())) continue;
             float sum = cut[i] * 2;
             for (int k = 0; k < 8; k++) sum += cut[i + off[k]] * (k < 4 ? 0.5f : 0.25f);
             wide[i] = Math.max(sum / 5, 0.6f * cut[i]);
