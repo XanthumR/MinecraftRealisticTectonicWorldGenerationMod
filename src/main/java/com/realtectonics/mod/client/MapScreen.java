@@ -24,7 +24,7 @@ import net.neoforged.neoforge.client.event.RegisterKeyMappingsEvent;
 import net.neoforged.neoforge.network.PacketDistributor;
 import org.lwjgl.glfw.GLFW;
 
-/** The whole planet on one screen (M), with you on it. Scroll to zoom, right-click to teleport, G for the next layer, R to replay the plates drifting. */
+/** The whole planet on one screen (M), with you on it. Scroll to zoom, drag to look around, shift-click to measure from a spot, C back to you, right-click to teleport, G for the next layer, R to replay the plates drifting. */
 @EventBusSubscriber(modid = RealTectonics.MODID, value = Dist.CLIENT)
 public final class MapScreen extends Screen {
     static final KeyMapping KEY = new KeyMapping("key.realtectonics.map", InputConstants.Type.KEYSYM, GLFW.GLFW_KEY_M, "key.categories.misc");
@@ -40,6 +40,8 @@ public final class MapScreen extends Screen {
     private static float[][] centres; // of the plates, for their arrows
 
     private int zoom = 1;
+    private double centreU = Double.NaN, centreV; // the cell in the middle of the view; NaN: wherever you are
+    private int[] mark; // block x, z distances are measured from (shift-click), or null
     private View view; // as drawn last frame, so clicks land where the map showed
     private long replayStart = -1; // System.nanoTime() the replay began, or -1
     private int[][] replayColors;  // each Drift frame coloured, made on the first replay
@@ -47,10 +49,27 @@ public final class MapScreen extends Screen {
     private int replayShown = -1;  // the blend step on the replay texture now
 
     /** The map rectangle on screen, and which cells of the planet it shows. */
-    private record View(int x0, int y0, int mapW, int mapH, int left, int top, float scale, int w, double playerU, double playerV, int blocksPerCell) {
+    private record View(int x0, int y0, int mapW, int mapH, int left, int top, float scale, int w, double playerU, double playerV, int blocksPerCell,
+                        double centreU, double centreV) {
+        /** Screen x, y of block (bx, bz), on the copy of the planet nearest the player. */
+        double[] screenOf(int[] b, LocalPlayer player) {
+            double u = playerU + (b[0] - player.getX()) / blocksPerCell, v = playerV + (b[1] - player.getZ()) / blocksPerCell;
+            return new double[]{x0 + ((u - left) % w + w) % w * scale, y0 + (v - top) * scale};
+        }
+
+        /** Blocks between two points across the ground, the short way round the planet. */
+        long distance(int[] a, int[] b) {
+            double span = (double) w * blocksPerCell, dx = ((b[0] - a[0]) % span + span * 1.5) % span - span / 2;
+            return Math.round(Math.hypot(dx, b[1] - a[1]));
+        }
+
+        boolean onMap(double mx, double my) {
+            return mx >= x0 && my >= y0 && mx < x0 + mapW && my < y0 + mapH;
+        }
+
         /** Block x, z under a screen point, on the copy of the planet nearest the player; null off the map. */
         int[] blockAt(double mx, double my, LocalPlayer player) {
-            if (mx < x0 || my < y0 || mx >= x0 + mapW || my >= y0 + mapH) return null;
+            if (!onMap(mx, my)) return null;
             double u = left + (mx - x0) / scale, v = top + (my - y0) / scale;
             double du = ((u - playerU) % w + w * 1.5) % w - w / 2.0; // the short way round the planet
             return new int[]{(int) Math.floor(player.getX() + du * blocksPerCell),
@@ -104,6 +123,11 @@ public final class MapScreen extends Screen {
             while (layer == 2 && t != null && t.data.format < 64); // no plates saved in older worlds
             return true;
         }
+        if (keyCode == GLFW.GLFW_KEY_C) {
+            centreU = Double.NaN;
+            mark = null;
+            return true;
+        }
         if (keyCode == GLFW.GLFW_KEY_R) {
             replayStart = replayStart < 0 ? System.nanoTime() : -1;
             return true;
@@ -113,6 +137,11 @@ public final class MapScreen extends Screen {
 
     @Override
     public boolean mouseClicked(double mouseX, double mouseY, int button) {
+        int[] spot = button == 0 && hasShiftDown() && view != null && minecraft.player != null ? view.blockAt(mouseX, mouseY, minecraft.player) : null;
+        if (spot != null) {
+            mark = spot;
+            return true;
+        }
         int[] target = button == 1 && view != null && minecraft.player != null ? view.blockAt(mouseX, mouseY, minecraft.player) : null;
         if (target == null) return super.mouseClicked(mouseX, mouseY, button);
         PacketDistributor.sendToServer(new MapTeleport(target[0], target[1])); // the server checks permission and finds the surface
@@ -121,8 +150,22 @@ public final class MapScreen extends Screen {
     }
 
     @Override
+    public boolean mouseDragged(double mouseX, double mouseY, int button, double dragX, double dragY) {
+        if (button != 0 || view == null || zoom == 1) return super.mouseDragged(mouseX, mouseY, button, dragX, dragY);
+        centreU -= dragX / view.scale; // the map follows the mouse
+        centreV -= dragY / view.scale;
+        return true;
+    }
+
+    @Override
     public boolean mouseScrolled(double mouseX, double mouseY, double scrollX, double scrollY) {
+        int was = zoom;
         zoom = Math.clamp(scrollY > 0 ? zoom * 2L : zoom / 2, 1, MAX_ZOOM);
+        if (view != null && view.onMap(mouseX, mouseY)) { // the spot under the cursor stays under it
+            double u = view.left + (mouseX - view.x0) / view.scale, v = view.top + (mouseY - view.y0) / view.scale;
+            centreU = u + (view.centreU - u) * was / zoom;
+            centreV = v + (view.centreV - v) * was / zoom;
+        }
         return true;
     }
 
@@ -160,10 +203,13 @@ public final class MapScreen extends Screen {
         int mapW = Math.min(width - 20, (height - 56) * 2), mapH = mapW / 2, x0 = (width - mapW) / 2, y0 = 22;
         double[] p = t.mapPosition(player.getX(), player.getZ());
         int viewW = w / zoom, viewH = h / zoom;
-        int left = zoom == 1 ? 0 : Math.floorMod((int) Math.round(p[0] - viewW / 2.0), w);
-        int top = zoom == 1 ? 0 : Math.clamp((int) Math.round(p[1] - viewH / 2.0), 0, h - viewH);
+        if (Double.isNaN(centreU)) { centreU = p[0]; centreV = p[1]; }
+        centreU = Math.floorMod(Math.round(centreU), w) + centreU - Math.round(centreU); // the planet wraps east-west...
+        centreV = Math.clamp(centreV, viewH / 2.0, h - viewH / 2.0);                      // ...but not past the poles
+        int left = zoom == 1 ? 0 : Math.floorMod((int) Math.round(centreU - viewW / 2.0), w);
+        int top = zoom == 1 ? 0 : (int) Math.round(centreV - viewH / 2.0);
         float scale = mapW / (float) viewW;
-        view = new View(x0, y0, mapW, mapH, left, top, scale, w, p[0], p[1], t.blocksPerCell);
+        view = new View(x0, y0, mapW, mapH, left, top, scale, w, p[0], p[1], t.blocksPerCell, left + viewW / 2.0, top + viewH / 2.0); // the middle as drawn
         // The planet wraps east-west, so a view across the 180° seam is drawn in two pieces.
         int firstW = Math.min(viewW, w - left), firstPx = Math.round(firstW * scale);
         g.blit(texture, x0, y0, firstPx, mapH, left, top, firstW, viewH, w, h);
@@ -172,6 +218,7 @@ public final class MapScreen extends Screen {
         // You: a red dot, with a white tick pointing where you face.
         double du = ((p[0] - left) % w + w) % w;
         int px = x0 + (int) (du * scale), py = y0 + (int) ((p[1] - top) * scale);
+        if (du < viewW && p[1] >= top && p[1] < top + viewH) { // off the view once you look elsewhere
         double yaw = Math.toRadians(player.getYRot()), dx = -Math.sin(yaw), dz = Math.cos(yaw);
         for (int i = 4; i <= 9; i++) {
             int tx = px + (int) Math.round(dx * i), ty = py + (int) Math.round(dz * i);
@@ -179,6 +226,7 @@ public final class MapScreen extends Screen {
         }
         g.fill(px - 3, py - 3, px + 4, py + 4, 0xFFFFFFFF);
         g.fill(px - 2, py - 2, px + 3, py + 3, 0xFFE02020);
+        }
         if (layer == 2) { // each plate's motion: an arrow from its middle, a dot at the head
             float[][] centres = MapLayers.plateCentres(t.data);
             for (int i = 0; i < centres.length; i++) {
@@ -207,12 +255,22 @@ public final class MapScreen extends Screen {
             case 4 -> String.format("%.1f °C", t.data.temperature[cell]);
             default -> t.biomeAt(bx, bz).toString();
         };
-        g.drawCenteredString(font, String.format("%.2f°%s %.2f°%s  |  %s  |  zoom x%d (scroll)  |  G: %s map  |  R: replay drift  |  M to close",
+        g.drawCenteredString(font, String.format("%.2f°%s %.2f°%s  |  %s  |  zoom x%d (scroll, drag, C: you)  |  G: %s map  |  R: replay drift  |  M to close",
                 Math.abs(lat), lat >= 0 ? "N" : "S", Math.abs(lon), lon >= 0 ? "E" : "W", here, zoom,
                 LAYERS[(layer + (layer == 1 && t.data.format < 64 ? 2 : 1)) % LAYERS.length]), width / 2, y0 + mapH + 6, 0xFFFFFF);
         int[] hover = view.blockAt(mouseX, mouseY, player);
+        if (mark != null) { // the measuring line: dots from the mark to the cursor, a square on the mark
+            double[] m = view.screenOf(mark, player);
+            int steps = hover == null ? 0 : (int) (Math.hypot(mouseX - m[0], mouseY - m[1]) / 4);
+            for (int i = 0; i <= steps; i++) {
+                int lx = (int) (m[0] + (mouseX - m[0]) * i / Math.max(1, steps)), ly = (int) (m[1] + (mouseY - m[1]) * i / Math.max(1, steps));
+                if (view.onMap(lx, ly)) g.fill(lx - 1, ly - 1, lx + 1, ly + 1, 0xFFFFFFFF);
+            }
+            if (view.onMap(m[0], m[1])) g.fill((int) m[0] - 3, (int) m[1] - 3, (int) m[0] + 3, (int) m[1] + 3, 0xFFFFE040);
+        }
         if (hover != null)
-            g.drawCenteredString(font, String.format("x %d, z %d  |  right-click to teleport", hover[0], hover[1]), width / 2, y0 + mapH + 18, 0xAAAAAA);
+            g.drawCenteredString(font, String.format("x %d, z %d%s  |  right-click to teleport, shift-click to measure", hover[0], hover[1],
+                    mark == null ? "" : String.format("  |  %,d blocks from the mark", view.distance(mark, hover))), width / 2, y0 + mapH + 18, 0xAAAAAA);
     }
 
     /** The plates drifting, frame by frame and blended between, over the whole map; false once it has run its course. */
