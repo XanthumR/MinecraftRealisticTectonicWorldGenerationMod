@@ -126,6 +126,14 @@ public final class Terrain {
     static final float TRAV_CHANCE = 1, TRAV_STRETCH = 0.05f; // share of sites with a spring; least crustal stretching (backArc) with faults deep enough to bring hot water up
     static final float TRAV_LENGTH = 48, TRAV_HALF = 4, TRAV_SPREAD = 0.35f; // real blocks: the terraces' mean length down the slope, half width at the spring, widening per block down
     static final int TRAV_STEP = 16;        // format 91: real blocks between the points searched for a fault scarp in a site's square
+    static final float PORPHYRY_SHARE = 0.6f; // format 92: share of extinct arc volcanoes with a porphyry copper stock under them
+    static final float STOCK_RADIUS = 16, STOCK_BURIAL = 60; // real blocks: the smallest stock's radius (up to twice it); deepest its top lies under the volcano's base
+    static final float VEIN_REACH = 0.6f, VEIN_HALF = 0.025f; // of the cone's radius: where an erupting volcano's veins reach; their half width in noise units (~2 blocks)
+    static final int KIMBERLITE_GRID = 1024; // real blocks between kimberlite sites (each may hold one pipe)
+    static final float KIMBERLITE_SHARE = 0.3f, PIPE_RADIUS = 5; // share of craton sites with a pipe; real blocks: the narrowest pipe's radius at the surface (up to 9)
+    static final float IRON_FIELD = 0.4f, COAL_FIELD = 0.35f, LAPIS_FIELD = 0.45f; // noise over which craton, basin and orogen rock holds its ore beds
+    static final int PLACER_CELLS = 24;     // cells downstream of a gold deposit its river carries gold
+    static final float PLACER_GOLD = 0.04f; // share of the bed's blocks that are gold just below the deposit, thinning out downstream
     static final float TRAV_POOL = 4, TRAV_TOL = 4; // real blocks: each pool's length down the slope; most the land may stand off its pool's level, or the site gets none
     static final int ICE_BLUR = 8;        // blocks: half-width of each of the two box means the rock is blurred by under glacier ice (format 56)
     static final float ICE_SUMMER_MAX = 15; // °C: summers this warm melt any glacier tongue that reaches them
@@ -320,6 +328,9 @@ public final class Terrain {
     private final float[] tuff;           // format 89: 0..1 per cell, how much of it a supervolcano's ignimbrite covers
     private final boolean chimneys;       // fairy chimneys on the ignimbrite's slopes; ash and tuff ground gullied and screed like bare ground: format 90
     private final boolean travertines;    // travertine terraces where hot springs rise on graben faults: format 91
+    public final boolean deposits;        // ore deposits where the geology put them (Deposits), vanilla's ores thinned: format 92
+    private final float[] placer;         // format 92: per cell, share of a river bed's blocks that are gold washed from a deposit upstream
+    private volatile byte[] depositCells; // format 92: per cell, the Deposits.Kind ordinal it holds or -1, for the map and /tectonic (lazy)
     private final java.util.concurrent.ConcurrentHashMap<Integer, Travertine> springSites = new java.util.concurrent.ConcurrentHashMap<>(); // format 91: each site square's terraces, or NO_TRAVERTINE
     private final List<float[]> sheets = new ArrayList<>(); // format 90: each supervolcano's ignimbrite {u, v (cells), radius (blocks), mean land round it (metres)}
     private final float[] bay, silt;      // format 37: land mask blurred wide (above 0.5 in a bay); river sand reaching the coast
@@ -471,6 +482,7 @@ public final class Terrain {
         ignimbrites = data.format >= 89;
         chimneys = data.format >= 90;
         travertines = data.format >= 91;
+        deposits = data.format >= 92;
         coneStyle = blownFlanks ? Volcano.BLOWN : smoothCones ? Volcano.SMOOTH_SCARS : variedVolcanoes ? Volcano.VARIED : Volcano.ROUND;
         snowLine = data.format >= 18;
         iceCapBelow = data.format >= 8 ? Biome.ICE_CAP_BELOW : Biome.OLD_ICE_CAP_BELOW;
@@ -674,6 +686,13 @@ public final class Terrain {
             for (int dy = -reach; dy <= reach; dy++)
                 for (int dx = -reach; dx <= reach; dx++)
                     conesByCell.add(cell(cu + dx, cv + dy), cone);
+        }
+        // From format 92 rivers wash gold out of the deposits they cut and drop it downstream in their gravel (placers).
+        placer = deposits ? new float[w * h] : null;
+        for (Volcano v : deposits ? data.volcanoes : List.<Volcano>of()) {
+            if (v.gone() || !porphyry(v) && !veins(v)) continue;
+            int g = cell(Math.round(v.u()), Math.round(v.v()));
+            for (int k = 0; k < PLACER_CELLS && g >= 0; k++, g = data.receiver[g]) placer[g] = Math.max(placer[g], PLACER_GOLD * (1 - k / (float) PLACER_CELLS));
         }
         for (Volcano v : landforms ? data.volcanoes : List.<Volcano>of()) {
             float summit = v.surfaceMetres(0);
@@ -1003,6 +1022,110 @@ public final class Terrain {
             if (e < Hydrology.SUPER_APRON) level = Math.max(Float.isNaN(level) ? -Float.MAX_VALUE : level, s[3] + Hydrology.SUPER_RIM * (float) Math.min(1, 1 - (e - 1) / (Hydrology.SUPER_APRON - 1)));
         }
         return level;
+    }
+
+    /** Format 92: whether volcano v has a porphyry copper stock under it: extinct arc volcanoes, its magma chamber cooled in place. */
+    private boolean porphyry(Volcano v) {
+        return !v.hotspot() && !v.active() && !v.supervolcano() && hash01((Math.round(v.u() * 7919) ^ Math.round(v.v() * 104729)) + 90) < PORPHYRY_SHARE;
+    }
+
+    /** Format 92: whether volcano v has gold veins round it: its hot water is still rising (erupting arcs, young hotspots). */
+    private boolean veins(Volcano v) {
+        return v.hotspot() ? v.age() < SPRING_AGE : v.active();
+    }
+
+    /**
+     * From format 92: the deposits at real block (x, z) of column c, or null (most columns). Porphyry stocks and veins
+     * come from the volcanoes, kimberlite pipes from sites on old cratons, ore beds from fields of the column's rock
+     * province, placer gold from the rivers below a deposit. Every site repeats around the planet like the others.
+     */
+    public Deposits.Lode lode(int x, int z, Column c) {
+        if (!deposits) return null;
+        double sx = x / (double) zoom, sz = z / (double) zoom;
+        float stock = 1;
+        int stockTop = 0;
+        boolean vein = false;
+        for (Cone k : conesNear(sx, sz)) {
+            double d = hyp(wrapBlocks(sx - k.x), sz - k.z) * zoom; // real blocks
+            int key = Math.round(k.v.u() * 7919) ^ Math.round(k.v.v() * 104729);
+            float r = STOCK_RADIUS * (1 + hash01(key + 91));
+            if (porphyry(k.v) && d < r * stock) { // its top under the volcano's base, the more so the more the cone still stands
+                stock = (float) (d / r);
+                stockTop = Math.round(k.baseY - STOCK_BURIAL * k.kept * hash01(key + 92));
+            }
+            vein |= veins(k.v) && d > k.craterRadius * zoom && d < VEIN_REACH * k.radius * zoom
+                    && Math.abs(fine(sx, sz, 64, 96)) < VEIN_HALF && fine(sx, sz, 256, 97) > 0.1f; // steep sheets along cracks
+        }
+        int gx = Math.floorDiv(x, KIMBERLITE_GRID), gz = Math.floorDiv(z, KIMBERLITE_GRID), key = Math.floorMod(gx, span * zoom / KIMBERLITE_GRID) * 3301 + gz * 61991 + 37;
+        float pipe = Float.MAX_VALUE, pipeRadius = PIPE_RADIUS * (1 + 0.8f * hash01(key + 3));
+        if (hash01(key) < KIMBERLITE_SHARE) {
+            double px = (gx + 0.1 + 0.8 * hash01(key + 1)) * KIMBERLITE_GRID, pz = (gz + 0.1 + 0.8 * hash01(key + 2)) * KIMBERLITE_GRID, d = hyp(wrapBlocks((x - px) / zoom) * zoom, z - pz);
+            if (d < pipeRadius && Rock.of(data.rock[cell((int) Math.round(warpU(px / zoom, pz / zoom)), (int) Math.round(warpV(px / zoom, pz / zoom)))]) == Rock.CRATON) pipe = (float) d;
+        }
+        Deposits.Ore bed = switch (c.rock()) {
+            case CRATON -> fine(sx, sz, 2048, 98) > IRON_FIELD ? Deposits.Ore.IRON : Deposits.Ore.NONE;
+            case BASIN -> fine(sx, sz, 2048, 99) > COAL_FIELD ? Deposits.Ore.COAL : Deposits.Ore.NONE;
+            case OROGEN -> fine(sx, sz, 1024, 100) > LAPIS_FIELD ? Deposits.Ore.LAPIS : Deposits.Ore.NONE;
+            default -> Deposits.Ore.NONE;
+        };
+        float gold = c.water() != Column.NO_WATER && c.water() >= SEA_Y && c.water() > c.ground() ? placer[cell((int) Math.round(warpU(sx, sz)), (int) Math.round(warpV(sx, sz)))] : 0;
+        if (stock >= 1 && !vein && pipe == Float.MAX_VALUE && bed == Deposits.Ore.NONE && gold == 0) return null;
+        return new Deposits.Lode(bed, stock, stockTop, pipe, pipeRadius, vein, gold);
+    }
+
+    /** Format 92: the kind of deposit at real block (x, z), or null. The body wins over the bed it cuts. */
+    public Deposits.Kind depositAt(int x, int z) {
+        Deposits.Lode l = lode(x, z, relaxedColumn(x, z));
+        if (l == null) return null;
+        if (l.stock() < 1) return Deposits.Kind.PORPHYRY;
+        if (l.pipe() < l.pipeRadius()) return Deposits.Kind.KIMBERLITE;
+        if (l.vein()) return Deposits.Kind.VEINS;
+        if (l.placer() > 0) return Deposits.Kind.PLACER;
+        return switch (l.bed()) { case IRON -> Deposits.Kind.IRON; case COAL -> Deposits.Kind.COAL; case LAPIS -> Deposits.Kind.LAPIS; default -> null; };
+    }
+
+    /**
+     * Format 92: per cell, the Deposits.Kind ordinal it holds or -1, read from the same sites and fields as lode() at the
+     * cell's middle (volcanoes, pipes and placers by their cell, as each is smaller than one). For the map and /tectonic.
+     */
+    public byte[] depositCells() {
+        byte[] k = depositCells;
+        if (k != null || !deposits) return k;
+        byte[] cells = new byte[w * h];
+        IntStream.range(0, h).parallel().forEach(cy -> {
+            for (int cx = 0; cx < w; cx++) {
+                int g = cx + cy * w;
+                double sx = wrap(cx - originX) * BLOCKS_PER_CELL, sz = (cy - originY) * BLOCKS_PER_CELL;
+                Rock r = Rock.of(data.rock[g]);
+                Deposits.Kind kind = data.metres[g] < 0 ? null : placer[g] > 0 && data.flow[g] >= Hydrology.RIVER_AREA ? Deposits.Kind.PLACER
+                        : r == Rock.CRATON && fine(sx, sz, 2048, 98) > IRON_FIELD ? Deposits.Kind.IRON
+                        : r == Rock.BASIN && fine(sx, sz, 2048, 99) > COAL_FIELD ? Deposits.Kind.COAL
+                        : r == Rock.OROGEN && fine(sx, sz, 1024, 100) > LAPIS_FIELD ? Deposits.Kind.LAPIS : null;
+                cells[g] = (byte) (kind == null ? -1 : kind.ordinal());
+            }
+        });
+        for (Volcano v : data.volcanoes)
+            if (!v.gone() && (porphyry(v) || veins(v)) && data.metres[cell(Math.round(v.u()), Math.round(v.v()))] >= 0)
+                cells[cell(Math.round(v.u()), Math.round(v.v()))] = (byte) (porphyry(v) ? Deposits.Kind.PORPHYRY : Deposits.Kind.VEINS).ordinal();
+        int grid = KIMBERLITE_GRID / zoom; // unzoomed blocks
+        for (int gz = Math.floorDiv(-originY * BLOCKS_PER_CELL, grid); gz * grid < (h - originY) * BLOCKS_PER_CELL; gz++)
+            for (int gx = 0; gx < span / grid; gx++) {
+                int key = gx * 3301 + gz * 61991 + 37;
+                if (hash01(key) >= KIMBERLITE_SHARE) continue;
+                double px = (gx + 0.1 + 0.8 * hash01(key + 1)) * grid, pz = (gz + 0.1 + 0.8 * hash01(key + 2)) * grid;
+                int g = cell((int) Math.round(warpU(px, pz)), (int) Math.round(warpV(px, pz)));
+                if (Rock.of(data.rock[g]) == Rock.CRATON) cells[g] = (byte) Deposits.Kind.KIMBERLITE.ordinal();
+            }
+        return depositCells = cells;
+    }
+
+    /** Format 92: the deposits map: each kind its colour over dim land, the sea dark. */
+    public int[] depositColors() {
+        byte[] k = depositCells();
+        int[] rgb = new int[w * h];
+        for (int g = 0; g < rgb.length; g++)
+            rgb[g] = k != null && k[g] >= 0 ? Deposits.Kind.values()[k[g]].color : data.metres[g] < 0 ? 0x1A2A40 : 0x4a5048;
+        return rgb;
     }
 
     /** Format 91: a spring's terraces: its source (real blocks), the unit vector down the slope, length, each pool's water level. */

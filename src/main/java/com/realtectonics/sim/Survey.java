@@ -12,6 +12,7 @@ public final class Survey {
     static final double EARTH_KM = 40_075;       // the planet is Earth-sized round the equator
     static final int BOUNDARY_REACH = 64;        // cells searched for the nearest plate boundary
     static final int GLACIER_REACH = 128;        // cells searched for the nearest glacier
+    static final int DEPOSIT_REACH = 96;         // cells searched for the nearest deposit of each kind (format 92)
 
     private Survey() {}
 
@@ -24,6 +25,26 @@ public final class Survey {
         List<String> out = new ArrayList<>();
         out.add(String.format("%s, %.0f m, %.1f °C, %.0f mm of rain a year", t.biomeAt(x, z), d.metres[g], d.temperature[g], d.precipitation[g]));
         out.add("Rock: " + describe(c.rock()) + (c.volcanic() ? ", fresh volcanic ground" : ""));
+        byte[] kinds = t.depositCells();
+        if (kinds != null) { // format 92: the ore here and the nearest of each kind
+            Deposits.Kind here = t.depositAt(x, z);
+            out.add(here == null ? "No ore deposit here." : "Ore deposit here: " + here.what);
+            double[] best = new double[Deposits.Kind.values().length];
+            int[] at = new int[best.length];
+            java.util.Arrays.fill(best, Double.MAX_VALUE);
+            for (int dy = -DEPOSIT_REACH; dy <= DEPOSIT_REACH; dy++)
+                for (int dx = -DEPOSIT_REACH; dx <= DEPOSIT_REACH; dx++) {
+                    int y = cv + dy, e = Math.floorMod(cu + dx, w) + y * w;
+                    double dist = Math.hypot(dx, dy);
+                    if (y >= 0 && y < h && kinds[e] >= 0 && dist < best[kinds[e]]) { best[kinds[e]] = dist; at[kinds[e]] = e; }
+                }
+            for (Deposits.Kind k : Deposits.Kind.values()) {
+                if (best[k.ordinal()] == Double.MAX_VALUE) continue;
+                double du = wrap(at[k.ordinal()] % w - cu, w), dv = at[k.ordinal()] / w - cv;
+                out.add(String.format("  nearest %s: %d blocks %s, near x %d z %d", k.name().toLowerCase(java.util.Locale.ROOT), blocks(best[k.ordinal()], t),
+                        compass(du, dv), x + blocks(du, t), z + blocks(dv, t)));
+            }
+        }
         if (d.format < 64) {
             out.add("This world's planet was made before plates were saved (format " + d.format + "): no plate details.");
             return out;
