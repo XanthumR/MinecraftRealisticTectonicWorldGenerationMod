@@ -108,6 +108,15 @@ public final class Terrain {
     static final double MAGMA_REACH = 0.6; // share of an active cone's reach out to which magma breaks through its ground in patches (format 58)
     static final float MAGMA_CRATER = 2;    // format 87: of the crater's radius: the hot ground round the vent, rim and all
     static final float MAGMA_FLANK = 0.15f; // format 87: heat left on the flanks out to MAGMA_REACH: a few steaming vents, not a rash
+    static final float MAAR_RAIN = 400;     // format 88: mm a year round a young volcano over which rising magma meets groundwater: maars
+    static final float MAAR_LAKE_RAIN = 700; // mm: wetter still, the water table stands inside the craters: maar lakes
+    static final float MAAR_RADIUS = 24;    // blocks: a maar crater's mean radius
+    static final float MAAR_DEPTH = 0.45f;  // of the radius: how far the crater's floor lies under its rim
+    static final float MAAR_RING = 0.15f;   // of the radius: the tuff ring's height over the land at the crater's edge
+    static final float MAAR_APRON = 1;      // of the radius: how far out from the edge the tuff ring thins to nothing
+    static final float MAAR_CREST = 0.4f;   // of the radius: how far out from the edge the ring climbs to its crest (a cliff there left posts by the water)
+    static final float MAAR_WALL = 0.6f;    // blocks per block: higher land round the crater is cut back this steep, which rock stands
+    static final float MAAR_LEVEL = 0.8f;   // of the radius: the most the land round a maar may rise over its lowest point; steeper sites get none
     static final int ICE_BLUR = 8;        // blocks: half-width of each of the two box means the rock is blurred by under glacier ice (format 56)
     static final float ICE_SUMMER_MAX = 15; // °C: summers this warm melt any glacier tongue that reaches them
     static final float LAKE_SILL = 0.25f;   // cells: width of the rock sill between two lakes at different levels
@@ -296,6 +305,7 @@ public final class Terrain {
     private final boolean blownFlanks;    // blown volcanoes: horseshoe craters, debris avalanches with hummocks, a dome in the young ones: format 85
     private final boolean ashFall;        // erupting arc volcanoes' ash blown downwind: format 86
     private final boolean hotCraters;     // magma patches round the crater, only a few vents on the flanks: format 87
+    private final boolean maars;          // explosion craters with tuff rings and lakes round young volcanoes in wet country: format 88
     private final float[] bay, silt;      // format 37: land mask blurred wide (above 0.5 in a bay); river sand reaching the coast
     private final java.util.concurrent.ConcurrentHashMap<Long, java.util.concurrent.CompletableFuture<Column[]>> relaxedTiles = new java.util.concurrent.ConcurrentHashMap<>();
     private final java.util.concurrent.ConcurrentLinkedQueue<Long> tileOrder = new java.util.concurrent.ConcurrentLinkedQueue<>();
@@ -328,7 +338,7 @@ public final class Terrain {
      */
     private record Cone(Volcano v, double x, double z, float radius, float craterRadius, float craterDepth, float height, boolean legacy,
                         boolean caldera, float[][] cinders, boolean collapsed, float rim, float lobes, float baseY, float kept, float dome, float domeTop,
-                        float[] edge) { // edge: from format 83 the rim as the land stands round the crater, NaN until first asked
+                        float[] edge, Maar[] maars) { // edge: from format 83 the rim as the land stands round the crater, NaN until first asked
         double reach() { // lobes: from format 36 a cone reaches further down some sides
             return legacy ? radius : SUMMIT * radius * lobes;
         }
@@ -441,6 +451,7 @@ public final class Terrain {
         blownFlanks = data.format >= 85;
         ashFall = data.format >= 86;
         hotCraters = data.format >= 87;
+        maars = data.format >= 88;
         coneStyle = blownFlanks ? Volcano.BLOWN : smoothCones ? Volcano.SMOOTH_SCARS : variedVolcanoes ? Volcano.VARIED : Volcano.ROUND;
         snowLine = data.format >= 18;
         iceCapBelow = data.format >= 8 ? Biome.ICE_CAP_BELOW : Biome.OLD_ICE_CAP_BELOW;
@@ -593,6 +604,16 @@ public final class Terrain {
                 float r = CINDER_RADIUS * (0.6f + 0.8f * hash01(key + 30 + i));
                 cinders[i] = new float[]{(float) (cx + d * Math.cos(a)), (float) (cz + d * Math.sin(a)), r, CINDER_STEEP * r};
             }
+            // From format 88 maars: where the ground is wet, magma rising beside the volcano meets groundwater and blows
+            // out craters below the land, ringed by low tuff (the Eifel, Ubehebe); a lake fills them in wet country.
+            float wet = bilinear(data.precipitation, v.u(), v.v());
+            Maar[] maarField = new Maar[maars && young && wet > MAAR_RAIN ? 1 + (int) (3 * hash01(key + 50)) : 0];
+            for (int i = 0; i < maarField.length; i++) {
+                float r = MAAR_RADIUS * (0.7f + 0.6f * hash01(key + 60 + i));
+                // Spread round the volcano: two overlapping, one's pit dug beside the other's lake (x -15551 z 6184).
+                double a = 2 * Math.PI * (hash01(key + 70) + (i + 0.3 * hash01(key + 71 + i)) / maarField.length), d = Math.max(0, radius - (2 + MAAR_APRON) * r) * (0.8 + 0.2 * hash01(key + 80 + i)); // low on the flank, where it levels out
+                maarField[i] = new Maar(cx + d * Math.cos(a), cz + d * Math.sin(a), r, wet > MAAR_LAKE_RAIN, new float[]{Float.NaN});
+            }
             float rim = toY(placed.surfaceMetres(craterRadius)); // the lowest point of the rim holds the crater's pool
             for (int i = 0; variedVolcanoes && i < 16; i++)
                 rim = Math.min(rim, toY(placed.surfaceMetres(craterRadius * Math.cos(i * Math.PI / 8), craterRadius * Math.sin(i * Math.PI / 8), coneStyle)));
@@ -606,7 +627,7 @@ public final class Terrain {
             float dome = volcanoKinds && !v.hotspot() && !collapsed && (hash01(key + 40) < DOME_SHARE || blownFlanks && v.blown() && v.active())
                     ? craterRadius * DOME_RADIUS * (0.8f + 0.4f * hash01(key + 41)) : 0;
             Cone cone = new Cone(placed, cx, cz, radius, craterRadius, craterDepth, height, legacy, caldera, cinders, collapsed, softCeiling(rim),
-                    variedVolcanoes ? Volcano.LOBE_MAX : 1, baseY, kept, dome, softCeiling(rim) - craterDepth * (1 - DOME_RISE * (0.8f + 0.6f * hash01(key + 42))), new float[]{Float.NaN});
+                    variedVolcanoes ? Volcano.LOBE_MAX : 1, baseY, kept, dome, softCeiling(rim) - craterDepth * (1 - DOME_RISE * (0.8f + 0.6f * hash01(key + 42))), new float[]{Float.NaN}, maarField);
             // Listed over the whole footprint once lava flows and hot springs reach past the summit.
             int reach = (int) Math.ceil((landforms ? cone.radius * cone.lobes : cone.reach()) / BLOCKS_PER_CELL) + 1, cu = Math.round(v.u()), cv = Math.round(v.v());
             for (int dy = -reach; dy <= reach; dy++)
@@ -1189,6 +1210,8 @@ public final class Terrain {
      */
     private boolean ash(double x, double z) {
         for (Cone c : conesNear(x, z)) {
+            for (Maar m : c.maars) // from format 88 a maar's tuff ring and dry floor are bare tuff too
+                if (hyp(wrapBlocks(x - m.x), z - m.z) < (1 + MAAR_APRON) * m.r && maarRim(m) != BREACHED) return true;
             if (!c.v.active() || c.v.hotspot() || c.collapsed) continue;
             double lat = Math.abs(Climate.latitude(Math.round(c.v.v()), h)), dx = wrapBlocks(x - c.x) / c.radius, dz = (z - c.z) / c.radius;
             double along = lat > 30 && lat < 60 ? dx : -dx; // westerlies blow east, trades and polar easterlies west
@@ -1197,6 +1220,63 @@ public final class Terrain {
             if (Math.max(near, plume) + 0.3f * fine(x, z, 16, 93) > ASH_EDGE) return true;
         }
         return false;
+    }
+
+    /** A maar, in unzoomed blocks like the cones; rim: NaN until maarRim first works it out. */
+    private record Maar(double x, double z, float r, boolean lake, float[] rim) {}
+
+    /**
+     * From format 88: the ground at a maar. A steam blast blew a crater below the land, a bowl with steep walls whose
+     * floor lies MAAR_DEPTH radii under the rim, and threw the shattered rock round it as a low tuff ring thinning out
+     * over MAAR_APRON radii. Cut from the land as it stands (maarRim), and not at all where water lies at or inside its
+     * edge, so no crater opens beside a river or lake.
+     */
+    private int maar(Maar m, double x, double z, int ground) {
+        double e = hyp(wrapBlocks(x - m.x), z - m.z) / m.r;
+        if (e >= 1 + MAAR_APRON) return ground;
+        float rim = maarRim(m);
+        if (rim == BREACHED) return ground;
+        if (e >= 1) { // land over the rim cut back to a slope that stands, the ring climbing from the edge to its crest and thinning out
+            float s = (float) (e - 1), t = 1 - s / MAAR_APRON;
+            return Math.round(Math.min(ground, rim + MAAR_WALL * s * m.r) + MAAR_RING * m.r * Math.min(1, s / MAAR_CREST) * t * t);
+        }
+        return Math.min(ground, Math.round(rim - MAAR_DEPTH * m.r * (1 - (float) (e * e * e * e))));
+    }
+
+    /** From format 88: a wet maar's lake level, a block under its rim, inside the crater; else none. */
+    private int maarLake(Maar m, double x, double z) {
+        if (!m.lake || hyp(wrapBlocks(x - m.x), z - m.z) >= m.r) return Column.NO_WATER;
+        float rim = maarRim(m);
+        return rim == BREACHED ? Column.NO_WATER : Math.round(rim) - 1;
+    }
+
+    /**
+     * The lowest ground just outside a maar, as craterRim finds a crater's: 32 samples of the finished land (without
+     * maars or crater pits: those count as breached while a rim is being found, so the answer never depends on thread
+     * order). Water, lava or ice there or half-way in, or the sea's level, breaches it: BREACHED, no maar; so does land
+     * rising more than MAAR_LEVEL radii round it: cut into a mountainside, its uphill wall stood 40 blocks sheer (x -15656
+     * z 5740, seed 777). Maars blow out in lowlands and on gentle flanks.
+     */
+    private float maarRim(Maar m) {
+        boolean[] busy = RIMMING.get();
+        if (busy[0]) return BREACHED;
+        float rim = m.rim[0];
+        if (!Float.isNaN(rim)) return rim;
+        rim = Float.MAX_VALUE;
+        float top = -Float.MAX_VALUE;
+        busy[0] = true;
+        try {
+            for (int i = 0; i < 32; i++) {
+                double a = i * Math.PI / 16, ca = Math.cos(a), sa = Math.sin(a);
+                Column at = column(m.x + 1.05 * m.r * ca, m.z + 1.05 * m.r * sa, false), in = i % 2 == 0 ? column(m.x + m.r * ca / 2, m.z + m.r * sa / 2, false) : at;
+                if (wet(at) || wet(in) || at.ice() != Column.NO_WATER || in.ice() != Column.NO_WATER || at.ground() <= SEA_Y + 1) rim = BREACHED;
+                rim = Math.min(rim, at.ground());
+                top = Math.max(top, at.ground());
+            }
+        } finally {
+            busy[0] = false;
+        }
+        return m.rim[0] = top - rim > MAAR_LEVEL * m.r ? BREACHED : rim;
     }
 
     /**
@@ -1647,6 +1727,11 @@ public final class Terrain {
                 if (c.v.active() && pool > SEA_Y) lava = (int) pool;
                 else water = Math.max(water, (int) pool);
             }
+            for (Maar m : c.maars) { // from format 88, in their own methods (column() size)
+                ground = maar(m, x, z, ground);
+                int level = maarLake(m, x, z);
+                if (level > ground && water == Column.NO_WATER) water = level;
+            }
         }
         // Karst: rain dissolves limestone from below; the roof falls in as sinkholes, or as water-filled cenotes.
         if (landforms && water == Column.NO_WATER && ground > SEA_Y + 3 && rain > KARST_RAIN && river.edge > 10 && lakeness < 0.01f
@@ -1657,6 +1742,7 @@ public final class Terrain {
                     int key = Math.floorMod(gx + dx, cells) * 7919 + (gz + dz) * 104729; // repeats around the planet
                     if (hash01(key) > KARST_CHANCE * smoothstep((rain - KARST_RAIN) / 600)) continue;
                     double px = (gx + dx + 0.2 + 0.6 * hash01(key + 1)) * KARST_GRID, pz = (gz + dz + 0.2 + 0.6 * hash01(key + 2)) * KARST_GRID;
+                    if (maars && !conesNear(px, pz).isEmpty()) continue; // from format 88: lava over the limestone; a sinkhole dug beside a maar's lake (x 15631 z 11347)
                     double d = hyp(wrapBlocks(x - px), z - pz), radius = 3 + 4 * hash01(key + 3);
                     if (d >= radius) continue;
                     int depth = 4 + Math.round(8 * hash01(key + 4));
