@@ -185,7 +185,7 @@ public final class Terrain {
     static final float CANYON_CUT = 0.8f, CANYON_MAX = 50; // canyon depth: share of the height above CANYON_HEIGHT; deepest cut // straight pieces per river reach when measuring distance to its curve
     static final double BULGE = 0.5;   // cells a reach's curve can stray from the straight line between its cells
     /** What lies on top of the ground where it is not soil, sand or bare rock. */
-    public enum Cover { NONE, SALT, GRAVEL, SINTER, SPRING, CLIFF, BANK, SCREE, POND, BARE_ICE, MORAINE, ASH } // BARE_ICE, MORAINE on glacier ice, from format 40; ASH from 86
+    public enum Cover { NONE, SALT, GRAVEL, SINTER, SPRING, CLIFF, BANK, SCREE, POND, BARE_ICE, MORAINE, ASH, IGNIMBRITE } // BARE_ICE, MORAINE on glacier ice, from format 40; ASH from 86; IGNIMBRITE (soil over tuff) from 89
 
     public static final int WATER_COLOR = 0x1e46b4, LAVA_COLOR = 0xff5a14, GLACIER_COLOR = 0xc8e6f5;
     static final float GLACIER_MELT = -1;      // °C annual mean at a valley floor: colder, and today's glaciers still fill it
@@ -306,6 +306,8 @@ public final class Terrain {
     private final boolean ashFall;        // erupting arc volcanoes' ash blown downwind: format 86
     private final boolean hotCraters;     // magma patches round the crater, only a few vents on the flanks: format 87
     private final boolean maars;          // explosion craters with tuff rings and lakes round young volcanoes in wet country: format 88
+    private final boolean ignimbrites;    // tuff under the soil of supervolcanoes' ignimbrite plains (sim): format 89
+    private final float[] tuff;           // format 89: 0..1 per cell, how much of it a supervolcano's ignimbrite covers
     private final float[] bay, silt;      // format 37: land mask blurred wide (above 0.5 in a bay); river sand reaching the coast
     private final java.util.concurrent.ConcurrentHashMap<Long, java.util.concurrent.CompletableFuture<Column[]>> relaxedTiles = new java.util.concurrent.ConcurrentHashMap<>();
     private final java.util.concurrent.ConcurrentLinkedQueue<Long> tileOrder = new java.util.concurrent.ConcurrentLinkedQueue<>();
@@ -452,6 +454,7 @@ public final class Terrain {
         ashFall = data.format >= 86;
         hotCraters = data.format >= 87;
         maars = data.format >= 88;
+        ignimbrites = data.format >= 89;
         coneStyle = blownFlanks ? Volcano.BLOWN : smoothCones ? Volcano.SMOOTH_SCARS : variedVolcanoes ? Volcano.VARIED : Volcano.ROUND;
         snowLine = data.format >= 18;
         iceCapBelow = data.format >= 8 ? Biome.ICE_CAP_BELOW : Biome.OLD_ICE_CAP_BELOW;
@@ -481,6 +484,15 @@ public final class Terrain {
         sediment = tablelands ? new float[w * h] : null;
         for (int g = 0; tablelands && g < w * h; g++) sediment[g] = data.rock[g] == Rock.BASIN.ordinal() ? 1 : 0;
         for (int pass = 0; tablelands && pass < 3; pass++) blur3x3(sediment);
+        tuff = ignimbrites ? new float[w * h] : null;
+        for (Volcano v : ignimbrites ? data.volcanoes : List.<Volcano>of()) {
+            if (!v.supervolcano()) continue;
+            float r = Hydrology.SUPER_APRON * v.superBlocks() / BLOCKS_PER_CELL;
+            for (int dy = -(int) r; dy <= r; dy++)
+                for (int dx = -(int) r; dx <= r; dx++)
+                    if (Math.hypot(dx, dy) < r && v.v() + dy >= 0 && v.v() + dy < h) tuff[cell((int) v.u() + dx, (int) v.v() + dy)] = 1;
+        }
+        for (int pass = 0; ignimbrites && pass < 2; pass++) blur3x3(tuff);
         // A high plain on an old craton or a sedimentary platform is not rugged for being high: no plates squeeze it, and
         // rivers can cut it only as deep as the low ground they drain to (the High Plains, the Highveld). Mountain belts,
         // arcs and volcanic land keep relief that grows with height.
@@ -1863,6 +1875,7 @@ public final class Terrain {
             biome = Biome.ERODED_BADLANDS; // canyon walls
         if (scree && river.edge > SCREE_RIVER && cover == Cover.NONE && water == Column.NO_WATER && lava == Column.NO_WATER && ice == Column.NO_WATER) cover = Cover.SCREE;
         if (ashFall && cover == Cover.NONE && !volcanic && water == Column.NO_WATER && ice == Column.NO_WATER && ground > SEA_Y + 1 && ash(x, z)) cover = Cover.ASH;
+        if (ignimbrites && cover == Cover.NONE && cubic(tuff, u, v) > 0.5f) cover = Cover.IGNIMBRITE;
         return new Column(ground, water, lava, ice, biome, fold, volcanic, rock, cover);
     }
 

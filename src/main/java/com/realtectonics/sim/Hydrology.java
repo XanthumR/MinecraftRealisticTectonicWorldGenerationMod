@@ -35,6 +35,8 @@ public final class Hydrology {
     static final float SUPER_FLOOR = 150;       // metres over the sea a caldera floor stays at least, so it holds a lake, not an inlet
     static final float SUPER_RIM = 250;         // metres the ignimbrite sheets raise the land at the rim, thinning out to SUPER_APRON radii
     static final float SUPER_APRON = 1.8f;      // of the caldera radius: where the ignimbrite sheets end
+    static final float SUPER_SKIN = 0.3f;       // format 89: share of SUPER_RIM the sheets leave on ridges they flowed over
+    static final float SUPER_PONDING = 600;     // format 89: metres the ash flows filled a valley at most
     static final float SUPER_WALL = 0.25f;      // of the radius: the wall from floor to rim
     static final float SUPER_DOME = 1.2f, SUPER_DOME_R = 0.45f, SUPER_DOME_OFF = 0.2f; // resurgent dome: of the depth it rises; its radius and offset, of the caldera's (Samosir)
     // Continental shelves: the drowned rim of a continent, shallow out to the shelf break, then the slope to the deep floor.
@@ -213,7 +215,10 @@ public final class Hydrology {
         float[] cones = new float[n], debris = new float[n];
         Arrays.fill(cones, Float.NaN);
         for (Volcano placed : volcanoes) {
-            if (placed.supervolcano()) continue; // its magma pooled underground: no cone
+            if (placed.supervolcano()) { // its magma pooled underground: no cone, but the ash flows of its eruption
+                ignimbrite(placed);
+                continue;
+            }
             int cu = (int) placed.u(), cv = (int) placed.v();
             float radius = Volcano.LOBE_MAX * placed.radiusBlocks() / Terrain.BLOCKS_PER_CELL;
             for (int dy = -(int) radius; dy <= radius; dy++)
@@ -291,11 +296,41 @@ public final class Hydrology {
                 if (d >= SUPER_APRON || cv + dy < 0 || cv + dy >= h) continue;
                 int g = Math.floorMod(cu + dx, w) + (cv + dy) * w;
                 float sheet = (float) (d < 1 ? 1 : 1 - (d - 1) / (SUPER_APRON - 1)), land = Planet.metres(elevation[g]) + SUPER_RIM * sheet * sheet;
-                if (d >= 1) { elevation[g] = Planet.fromMetres(land); continue; }
+                if (d >= 1) { elevation[g] = Planet.fromMetres(land); continue; } // from format 89 over the plain of ignimbrite(): the welded top, thickest at the rim, closes it over canyons cut since
                 float t = (float) Math.clamp((d - 1 + SUPER_WALL) / SUPER_WALL, 0, 1), wall = t * t * (3 - 2 * t);
                 double e = Math.hypot(dx - ox, dy - oy) / (SUPER_DOME_R * r);
                 float floor = Math.max(SUPER_FLOOR, land - SUPER_DEPTH - SUPER_FILL * (land - low)) + (e < 1 ? SUPER_DOME * SUPER_DEPTH * (float) (1 - e * e) : 0);
                 elevation[g] = Planet.fromMetres(floor + (land - floor) * wall);
+            }
+    }
+
+    /**
+     * From format 89: the ignimbrite of a supervolcano's eruption, laid when the volcanoes go up, so the last erosion
+     * passes cut canyons into it. Its ash flows ran over the land as a dense hot fluid and pooled in the valleys:
+     * they filled them up to a near-level plain (the mean land round the caldera, plus SUPER_RIM thinning out to
+     * SUPER_APRON radii), at most SUPER_PONDING deep, and left a thin skin on the ridges they crossed (the Bishop
+     * Tuff, Cappadocia's plateaus, the Altiplano's). The caldera block itself falls in later (collapseSuper), and its
+     * rim sheet goes on then too: without it the canyons the plain shed through the future rim drained the lake.
+     */
+    private void ignimbrite(Volcano v) {
+        int cu = (int) v.u(), cv = (int) v.v();
+        float r = v.superBlocks() / Terrain.BLOCKS_PER_CELL, reach = SUPER_APRON * r, sum = 0;
+        int n = 0;
+        for (int dy = -(int) reach; dy <= reach; dy++) // the land round the caldera: the plain levels out over it
+            for (int dx = -(int) reach; dx <= reach; dx++) {
+                double d = Math.hypot(dx, dy) / r;
+                if (d < 1 || d >= SUPER_APRON || cv + dy < 0 || cv + dy >= h) continue;
+                sum += Planet.metres(elevation[Math.floorMod(cu + dx, w) + (cv + dy) * w]);
+                n++;
+            }
+        float mean = n > 0 ? sum / n : v.baseMetres();
+        for (int dy = -(int) reach; dy <= reach; dy++)
+            for (int dx = -(int) reach; dx <= reach; dx++) {
+                double d = Math.hypot(dx, dy) / r;
+                if (d >= SUPER_APRON || cv + dy < 0 || cv + dy >= h) continue;
+                int g = Math.floorMod(cu + dx, w) + (cv + dy) * w;
+                float sheet = (float) (d < 1 ? 1 : 1 - (d - 1) / (SUPER_APRON - 1)), land = Planet.metres(elevation[g]);
+                elevation[g] = Planet.fromMetres(Math.max(land + SUPER_SKIN * SUPER_RIM * sheet * sheet, Math.min(mean + SUPER_RIM * sheet, land + SUPER_PONDING)));
             }
     }
 

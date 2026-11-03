@@ -408,6 +408,7 @@ public final class TectonicChunkGenerator extends ChunkGenerator {
                 ? Math.floorDiv(t, STRATA_PERIOD) * STRATA_BEDS + STRATA_BED[Math.floorMod(t, STRATA_PERIOD)] : Math.floorDiv(t, LAYER_THICKNESS);
         int hash = (layer * 0x9E3779B1) >>> 16;
         if (c.volcanic() && y > c.ground() - VOLCANIC_DEPTH) return VOLCANIC_LAYERS[hash % VOLCANIC_LAYERS.length];
+        if (c.cover() == Terrain.Cover.IGNIMBRITE && y > c.ground() - VOLCANIC_DEPTH) return (hash & 3) == 0 ? CALCITE : TUFF; // pale tuff, whiter beds (format 89)
         // Terracotta bands belong to deserts and canyon walls (the badlands look); savanna keeps its own rock.
         boolean arid = (badlands(c.biome()) || c.biome() == Biome.DESERT || c.cover() == Terrain.Cover.CLIFF && c.biome() == Biome.SAVANNA) && y > c.ground() - ARID_DEPTH;
         BlockState[] layers = arid ? ARID_LAYERS : PROVINCE_LAYERS[c.rock().ordinal()];
