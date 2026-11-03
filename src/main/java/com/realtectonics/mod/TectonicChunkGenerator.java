@@ -135,6 +135,7 @@ public final class TectonicChunkGenerator extends ChunkGenerator {
             SNOW_PACK = new Surface(Blocks.SNOW_BLOCK.defaultBlockState(), Blocks.PACKED_ICE.defaultBlockState(), false),
             ROCK = new Surface(null, null, false),
             ASH = new Surface(Blocks.TUFF.defaultBlockState(), Blocks.TUFF.defaultBlockState(), false), // fresh ash fall (format 86): no soil yet
+            CHIMNEY_CAP = new Surface(Blocks.ANDESITE.defaultBlockState(), Blocks.TUFF.defaultBlockState(), false), // a fairy chimney's hard cap (format 90)
             SCREE_STONE = new Surface(Blocks.COBBLESTONE.defaultBlockState(), Blocks.GRAVEL.defaultBlockState(), false),
             MAGMA_PATCH = new Surface(Blocks.MAGMA_BLOCK.defaultBlockState(), null, false); // hot rock breaking through an active volcano's ground (format 58)
 
@@ -408,7 +409,8 @@ public final class TectonicChunkGenerator extends ChunkGenerator {
                 ? Math.floorDiv(t, STRATA_PERIOD) * STRATA_BEDS + STRATA_BED[Math.floorMod(t, STRATA_PERIOD)] : Math.floorDiv(t, LAYER_THICKNESS);
         int hash = (layer * 0x9E3779B1) >>> 16;
         if (c.volcanic() && y > c.ground() - VOLCANIC_DEPTH) return VOLCANIC_LAYERS[hash % VOLCANIC_LAYERS.length];
-        if (c.cover() == Terrain.Cover.IGNIMBRITE && y > c.ground() - VOLCANIC_DEPTH) return (hash & 3) == 0 ? CALCITE : TUFF; // pale tuff, whiter beds (format 89)
+        if ((c.cover() == Terrain.Cover.IGNIMBRITE || c.cover() == Terrain.Cover.CHIMNEY || c.cover() == Terrain.Cover.CHIMNEY_CAP) && y > c.ground() - VOLCANIC_DEPTH)
+            return (hash & 3) == 0 ? CALCITE : TUFF; // pale tuff, whiter beds (format 89; fairy chimneys from 90)
         // Terracotta bands belong to deserts and canyon walls (the badlands look); savanna keeps its own rock.
         boolean arid = (badlands(c.biome()) || c.biome() == Biome.DESERT || c.cover() == Terrain.Cover.CLIFF && c.biome() == Biome.SAVANNA) && y > c.ground() - ARID_DEPTH;
         BlockState[] layers = arid ? ARID_LAYERS : PROVINCE_LAYERS[c.rock().ordinal()];
@@ -417,6 +419,8 @@ public final class TectonicChunkGenerator extends ChunkGenerator {
 
     private static Surface surface(Terrain.Column c, int slope, boolean wet) {
         if (c.cover() == Terrain.Cover.SPRING) return SPRING; // soul sand sends up streams of bubbles, like steam
+        if (c.cover() == Terrain.Cover.CHIMNEY) return ROCK; // a fairy chimney's bare tuff (format 90)
+        if (c.cover() == Terrain.Cover.CHIMNEY_CAP) return CHIMNEY_CAP; // the harder rock that capped it
         if (c.cover() == Terrain.Cover.SINTER) return (c.ground() & 1) == 0 ? SINTER : SINTER_STAINED;
         if (wet && c.cover() == Terrain.Cover.POND) return (c.fold() & 2) == 0 ? MUD : CLAY; // still water settles fine silt
         if (wet) return c.water() - c.ground() > 8 ? GRAVEL : BEACH;

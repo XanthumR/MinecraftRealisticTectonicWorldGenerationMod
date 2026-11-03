@@ -30,6 +30,7 @@ for (int sum = 0; sum < 2 * n - 1; sum++)
     if (c.lava() > c.ground()) rgb = 0xff5a14;
     if (c.cover() == Terrain.Cover.SALT) rgb = 0xf4f4f0;
     if (c.cover() == Terrain.Cover.ASH) rgb = 0x5c5a58; // fresh ash (format 86), dark grey
+    if (c.cover() == Terrain.Cover.CHIMNEY) rgb = 0xd8d2c0; if (c.cover() == Terrain.Cover.CHIMNEY_CAP) rgb = 0x6a6660; // fairy chimneys (format 90): pale tuff, dark cap
     if (c.volcanic() && c.lava() == Terrain.Column.NO_WATER && !(c.water() >= c.ground() && c.water() != Terrain.Column.NO_WATER) && c.ice() == Terrain.Column.NO_WATER && t.magmaPatch(cx + x - n / 2, cz + z - n / 2)) rgb = 0xff8020; // magma patches (format 58)
     g.setColor(new java.awt.Color(rgb)); g.fillRect(sx, sy, 2 * s, s);
     int r = rgb >> 16 & 255, gg = rgb >> 8 & 255, b = rgb & 255;
