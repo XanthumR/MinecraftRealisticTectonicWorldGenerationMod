@@ -17,6 +17,7 @@ one before trusting it.
 | `falls.jsh` | Water spilling onto dry land (baseline 5 since format 79; 12 column edges since the latest climate changes reshaped seed 777, 4 and 23 before; perched river banks, open) |
 | `pondscan.jsh` | Pond spills (0) |
 | `calderas.jsh` | Caldera lake spills (0); every crater's lava or rainwater pool spilling (0 at format 83-84, 3 at 82, 1 from 85: a river's perched bank over a blown summit; `-Dfmt=N`); from format 81 supervolcanoes (seed 777: 3), lava domes (46, 47 from 85) and domes in a lake or lava (0) |
+| `maars.jsh` | Format 88 maars: lakes, dry, breached (seed 777: 19, 4, 105), maar lake spill edges (0) and posts after rockfall (4); `-Dplanet -Dfmt` |
 | `blown.jsh` | Format 85: generates seed 777 into `out/p85_777.bin` and lists the blown volcanoes (15) in block coordinates with their debris lobes, for `uview3d`/`hillshade` |
 | `biomeedge.jsh` | Desert next to snow (0%) |
 | `tune.sh` | Earth climate vs the real Köppen map in one go (`earthclim.jsh` → `koppen.py` → `kregion.py`); pass `-R-D` knobs. `earthclim.jsh -Dseed=N` + `kdry.py` give a random planet's desert shares, `kshares.py` Earth's per region, `climrow.jsh` rain along one latitude, `climtime.jsh` Huge simulation time, `randmap.jsh` a random planet's map and ice share (`-Dwidth`, `-Dmedium=true`); `-R-Dwidth=2048` on `tune.sh` checks planet size doesn't change the climate |
