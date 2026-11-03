@@ -8,6 +8,7 @@ import com.mojang.serialization.DataResult;
 import com.mojang.serialization.MapCodec;
 import com.mojang.serialization.codecs.RecordCodecBuilder;
 import com.realtectonics.sim.Biome;
+import com.realtectonics.sim.Deposits;
 import com.realtectonics.sim.PlanetSettings;
 import com.realtectonics.sim.Rock;
 import com.realtectonics.sim.Terrain;
@@ -138,7 +139,28 @@ public final class TectonicChunkGenerator extends ChunkGenerator {
             CHIMNEY_CAP = new Surface(Blocks.ANDESITE.defaultBlockState(), Blocks.TUFF.defaultBlockState(), false), // a fairy chimney's hard cap (format 90)
             TRAVERTINE = new Surface(Blocks.CALCITE.defaultBlockState(), Blocks.CALCITE.defaultBlockState(), false), // a hot spring's terraces (format 91)
             SCREE_STONE = new Surface(Blocks.COBBLESTONE.defaultBlockState(), Blocks.GRAVEL.defaultBlockState(), false),
-            MAGMA_PATCH = new Surface(Blocks.MAGMA_BLOCK.defaultBlockState(), null, false); // hot rock breaking through an active volcano's ground (format 58)
+            MAGMA_PATCH = new Surface(Blocks.MAGMA_BLOCK.defaultBlockState(), null, false), // hot rock breaking through an active volcano's ground (format 58)
+            GOSSAN = new Surface(Blocks.DYED_TERRACOTTA.orange().defaultBlockState(), Blocks.DYED_TERRACOTTA.brown().defaultBlockState(), false), // rusted sulphides over a porphyry (format 92)
+            RED_SOIL = new Surface(Blocks.DYED_TERRACOTTA.red().defaultBlockState(), Blocks.DYED_TERRACOTTA.red().defaultBlockState(), false), // weathered iron bed (format 92)
+            BLUE_GROUND = new Surface(Blocks.CLAY.defaultBlockState(), Blocks.TUFF.defaultBlockState(), false); // kimberlite weathered to clay (format 92)
+    /** Format 92: each Deposits.Ore's block in stone and in deepslate; NONE is never placed. */
+    private static final BlockState[][] ORE_BLOCKS = {
+            {STONE, STONE},
+            {Blocks.COPPER_ORE.defaultBlockState(), Blocks.DEEPSLATE_COPPER_ORE.defaultBlockState()},
+            {Blocks.GOLD_ORE.defaultBlockState(), Blocks.DEEPSLATE_GOLD_ORE.defaultBlockState()},
+            {Blocks.IRON_ORE.defaultBlockState(), Blocks.DEEPSLATE_IRON_ORE.defaultBlockState()},
+            {Blocks.COAL_ORE.defaultBlockState(), Blocks.DEEPSLATE_COAL_ORE.defaultBlockState()},
+            {Blocks.DIAMOND_ORE.defaultBlockState(), Blocks.DEEPSLATE_DIAMOND_ORE.defaultBlockState()},
+            {Blocks.LAPIS_ORE.defaultBlockState(), Blocks.DEEPSLATE_LAPIS_ORE.defaultBlockState()},
+            {Blocks.REDSTONE_ORE.defaultBlockState(), Blocks.DEEPSLATE_REDSTONE_ORE.defaultBlockState()},
+            {TUFF, TUFF},           // kimberlite's blue ground
+            {CALCITE, CALCITE}};    // a vein's quartz
+    /** Format 92: vanilla's ores, of which only ORE_KEEP stay outside the deposits; emerald is mountain-only already. */
+    private static final java.util.Set<net.minecraft.world.level.block.Block> THINNED = new java.util.HashSet<>();
+    static {
+        for (BlockState[] o : ORE_BLOCKS) if (o[0] != STONE && o[0] != TUFF && o[0] != CALCITE) { THINNED.add(o[0].getBlock()); THINNED.add(o[1].getBlock()); }
+    }
+    static final float ORE_KEEP = 0.35f;
 
     private final PlanetSettings planet;
     private final Holder<NoiseGeneratorSettings> settings;
@@ -215,6 +237,13 @@ public final class TectonicChunkGenerator extends ChunkGenerator {
                 if (!glacier && !wet && RealTectonics.terrain().gentleShores) s = dryEdge(s, c, x0 + lx, z0 + lz);
                 if (!glacier && !wet && !hot && c.volcanic() && RealTectonics.terrain().magmaPatch(x0 + lx, z0 + lz)) s = MAGMA_PATCH;
                 if (!glacier && !wet) s = moddedGround(chunk, s, c, x0 + lx, z0 + lz);
+                Deposits.Lode lode = RealTectonics.terrain().lode(x0 + lx, z0 + lz, c);
+                if (lode != null && !glacier && !wet) s = switch (Deposits.sign(lode, c.ground(), layerHash(c, c.ground()))) { // what a prospector looks for
+                    case GOSSAN -> GOSSAN;
+                    case RED_SOIL -> RED_SOIL;
+                    case BLUE_GROUND -> BLUE_GROUND;
+                    case NONE -> s;
+                };
                 if (!glacier && !wet && !scree(c, slope) && alpine(c.biome()) && !snowStays(slope, shaded, RealTectonics.terrain().patch(x0 + lx, z0 + lz)))
                     s = ROCK; // steep faces, ridges and wind-scoured patches stand bare above the snow
                 Terrain terrain = RealTectonics.terrain();
@@ -254,6 +283,10 @@ public final class TectonicChunkGenerator extends ChunkGenerator {
                                     : firn && c.ice() - y < FIRN_DEPTH ? SNOW_BLOCK // above the snow line (no bare ice, no rubble): last winters' snow
                                     : c.ice() - y >= BLUE_ICE_DEPTH || y == c.ice() && c.cover() == Terrain.Cover.BARE_ICE ? BLUE_ICE : PACKED_ICE)
                             : SNOW;
+                    if (lode != null && y > minY && (y < c.ground() - 4 || y >= c.ground() - 1 && y <= c.ground())) { // ore in the rock, gold in a river's bed
+                        Deposits.Ore o = Deposits.ore(lode, y, c.ground(), layerHash(c, y), oreHash(x0 + lx, y, z0 + lz));
+                        if (o != Deposits.Ore.NONE) state = ORE_BLOCKS[o.ordinal()][y < 0 || state == DEEPSLATE ? 1 : 0];
+                    }
                     if (y <= caveTop && y > minY + Caves.FLOOR && caveField.air(lx, y, lz, c.ground() - y, y < open)) state = y < Caves.LAVA_BELOW ? LAVA : AIR;
                     else if (y <= c.ground()) {
                         solidTop = y;
@@ -406,9 +439,7 @@ public final class TectonicChunkGenerator extends ChunkGenerator {
     /** Layered bedrock geology: each layer is one rock type everywhere, shifted up and down by the column's fold. */
     static BlockState rock(Terrain.Column c, int y) {
         if (y < 0) return DEEPSLATE;
-        int t = y + c.fold(), layer = RealTectonics.terrain().foldedStrata // from format 34 beds vary in thickness, as real ones do
-                ? Math.floorDiv(t, STRATA_PERIOD) * STRATA_BEDS + STRATA_BED[Math.floorMod(t, STRATA_PERIOD)] : Math.floorDiv(t, LAYER_THICKNESS);
-        int hash = (layer * 0x9E3779B1) >>> 16;
+        int hash = layerHash(c, y);
         if (c.volcanic() && y > c.ground() - VOLCANIC_DEPTH) return VOLCANIC_LAYERS[hash % VOLCANIC_LAYERS.length];
         if ((c.cover() == Terrain.Cover.IGNIMBRITE || c.cover() == Terrain.Cover.CHIMNEY || c.cover() == Terrain.Cover.CHIMNEY_CAP) && y > c.ground() - VOLCANIC_DEPTH)
             return (hash & 3) == 0 ? CALCITE : TUFF; // pale tuff, whiter beds (format 89; fairy chimneys from 90)
@@ -416,6 +447,50 @@ public final class TectonicChunkGenerator extends ChunkGenerator {
         boolean arid = (badlands(c.biome()) || c.biome() == Biome.DESERT || c.cover() == Terrain.Cover.CLIFF && c.biome() == Biome.SAVANNA) && y > c.ground() - ARID_DEPTH;
         BlockState[] layers = arid ? ARID_LAYERS : PROVINCE_LAYERS[c.rock().ordinal()];
         return layers[hash % layers.length];
+    }
+
+    /** The hash of the rock layer at height y of the column: which rock it is, and from format 92 whether it is an ore bed. */
+    static int layerHash(Terrain.Column c, int y) {
+        int t = y + c.fold(), layer = RealTectonics.terrain().foldedStrata // from format 34 beds vary in thickness, as real ones do
+                ? Math.floorDiv(t, STRATA_PERIOD) * STRATA_BEDS + STRATA_BED[Math.floorMod(t, STRATA_PERIOD)] : Math.floorDiv(t, LAYER_THICKNESS);
+        return (layer * 0x9E3779B1) >>> 16;
+    }
+
+    /** 0..1 for a block: which of a deposit's blocks are ore, and which vanilla ores stay (format 92). */
+    static float oreHash(int x, int y, int z) {
+        long h = (x * 0x9E3779B97F4A7C15L) ^ (y * 0xC2B2AE3D27D4EB4FL) ^ (z * 0x165667B19E3779F9L);
+        h = (h ^ (h >>> 31)) * 0xBF58476D1CE4E5B9L;
+        return ((h >>> 40) & 0xFFFF) / 65536f;
+    }
+
+    /**
+     * From format 92 vanilla's ores, spread evenly through all rock, are thinned to ORE_KEEP outside the deposits, so
+     * the rich ore lies where the geology put it. Only sections whose palette may hold one are looked at. Ores another
+     * chunk's decoration later spills into this one stay: a few at chunk edges.
+     */
+    private static void thinOres(ChunkAccess chunk, Terrain terrain) {
+        int x0 = chunk.getPos().getMinBlockX(), z0 = chunk.getPos().getMinBlockZ();
+        Terrain.Column[] cols = null;
+        Deposits.Lode[] lodes = null;
+        for (int si = 0; si < chunk.getSectionsCount(); si++) {
+            LevelChunkSection section = chunk.getSection(si);
+            if (section.hasOnlyAir() || !section.maybeHas(b -> THINNED.contains(b.getBlock()))) continue;
+            if (cols == null) {
+                cols = terrain.relaxedColumns(x0, z0, 16, 16);
+                lodes = new Deposits.Lode[256];
+                for (int i = 0; i < 256; i++) lodes[i] = terrain.lode(x0 + (i & 15), z0 + (i >> 4), cols[i]);
+            }
+            int y0 = chunk.getSectionYFromSectionIndex(si) << 4;
+            for (int y = 0; y < 16; y++)
+                for (int z = 0; z < 16; z++)
+                    for (int x = 0; x < 16; x++) {
+                        if (!THINNED.contains(section.getBlockState(x, y, z).getBlock()) || oreHash(x0 + x, y0 + y, z0 + z) < ORE_KEEP) continue;
+                        Terrain.Column c = cols[x + z * 16];
+                        Deposits.Lode l = lodes[x + z * 16];
+                        if (l != null && Deposits.ore(l, y0 + y, c.ground(), layerHash(c, y0 + y), oreHash(x0 + x, y0 + y, z0 + z)) != Deposits.Ore.NONE) continue; // a deposit's own
+                        section.setBlockState(x, y, z, rock(c, y0 + y), false);
+                    }
+        }
     }
 
     private static Surface surface(Terrain.Column c, int slope, boolean wet) {
@@ -546,6 +621,7 @@ public final class TectonicChunkGenerator extends ChunkGenerator {
     public void applyBiomeDecoration(WorldGenLevel level, ChunkAccess chunk, StructureManager structures) {
         super.applyBiomeDecoration(level, chunk, structures);
         Terrain terrain = RealTectonics.terrain();
+        if (terrain.deposits) thinOres(chunk, terrain);
         BlockPos.MutableBlockPos pos = new BlockPos.MutableBlockPos(), below = new BlockPos.MutableBlockPos();
         int x0 = chunk.getPos().getMinBlockX(), z0 = chunk.getPos().getMinBlockZ();
         // Vanilla's river and ocean biomes lay round gravel disks on the bed; in shallow braided rivers they read as gray

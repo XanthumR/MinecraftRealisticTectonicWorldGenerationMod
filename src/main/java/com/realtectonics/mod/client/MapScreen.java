@@ -26,7 +26,7 @@ import org.lwjgl.glfw.GLFW;
 public final class MapScreen extends Screen {
     static final KeyMapping KEY = new KeyMapping("key.realtectonics.map", InputConstants.Type.KEYSYM, GLFW.GLFW_KEY_M, KeyMapping.Category.MISC);
     private static final int MAX_ZOOM = 16;
-    private static final String[] LAYERS = {"biome", "geology", "plates", "rain", "temperature"};
+    private static final String[] LAYERS = {"biome", "geology", "plates", "rain", "temperature", "ore deposits"};
     private static final double REPLAY_SECONDS = 8; // the whole run, start to end
     private static final int ARROW_PIXELS = 40;    // arrow length of a plate moving one cell a step
 
@@ -111,7 +111,7 @@ public final class MapScreen extends Screen {
         if (key.key() == GLFW.GLFW_KEY_G) {
             Terrain t = RealTectonics.terrainOrNull();
             do layer = (layer + 1) % LAYERS.length;
-            while (layer == 2 && t != null && t.data.format < 64); // no plates saved in older worlds
+            while (layer == 2 && t != null && t.data.format < 64 || layer == 5 && t != null && !t.deposits); // no plates saved in older worlds, no deposits before format 92
             return true;
         }
         if (key.key() == GLFW.GLFW_KEY_C) {
@@ -183,6 +183,7 @@ public final class MapScreen extends Screen {
                 case 2 -> MapLayers.plates(t.data);
                 case 3 -> MapLayers.rain(t.data);
                 case 4 -> MapLayers.temperature(t.data);
+                case 5 -> t.depositCells() == null ? t.mapColors(false) : t.depositColors(); // format 92
                 default -> t.mapColors(layer == 1);
             };
             textures[layer] = upload("planet_map_" + layer, rgb, w, h, null);
@@ -243,6 +244,7 @@ public final class MapScreen extends Screen {
             case 2 -> "plate " + (t.data.plate[cell] & 255);
             case 3 -> Math.round(t.data.precipitation[cell]) + " mm/yr";
             case 4 -> String.format("%.1f °C", t.data.temperature[cell]);
+            case 5 -> t.depositCells() == null || t.depositCells()[cell] < 0 ? "no deposit" : com.realtectonics.sim.Deposits.Kind.values()[t.depositCells()[cell]].name().toLowerCase(java.util.Locale.ROOT);
             default -> t.biomeAt(bx, bz).toString();
         };
         g.centeredText(font, String.format("%.2f°%s %.2f°%s  |  %s  |  zoom x%d (scroll, drag, C: you)  |  G: %s map  |  R: replay drift  |  M to close",
