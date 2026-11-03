@@ -122,6 +122,11 @@ public final class Terrain {
     static final float CHIMNEY_SLOPE = 0.3f; // blocks per block the ground must fall at a site: chimneys stand on valley sides, not the plain
     static final float CHIMNEY_BELOW = 30, CHIMNEY_DEEP = 600; // metres under the ignimbrite plain's level a site must lie: in a valley cut into it, not through it
     static final float CHIMNEY_RADIUS = 1.3f, CHIMNEY_HEIGHT = 6; // real blocks: the thinnest's radius and the shortest's height; up to twice that
+    static final int TRAV_GRID = 256;       // format 91: real blocks between travertine sites (each may hold one)
+    static final float TRAV_CHANCE = 1, TRAV_STRETCH = 0.05f; // share of sites with a spring; least crustal stretching (backArc) with faults deep enough to bring hot water up
+    static final float TRAV_LENGTH = 48, TRAV_HALF = 4, TRAV_SPREAD = 0.35f; // real blocks: the terraces' mean length down the slope, half width at the spring, widening per block down
+    static final int TRAV_STEP = 16;        // format 91: real blocks between the points searched for a fault scarp in a site's square
+    static final float TRAV_POOL = 4, TRAV_TOL = 4; // real blocks: each pool's length down the slope; most the land may stand off its pool's level, or the site gets none
     static final int ICE_BLUR = 8;        // blocks: half-width of each of the two box means the rock is blurred by under glacier ice (format 56)
     static final float ICE_SUMMER_MAX = 15; // °C: summers this warm melt any glacier tongue that reaches them
     static final float LAKE_SILL = 0.25f;   // cells: width of the rock sill between two lakes at different levels
@@ -190,7 +195,7 @@ public final class Terrain {
     static final float CANYON_CUT = 0.8f, CANYON_MAX = 50; // canyon depth: share of the height above CANYON_HEIGHT; deepest cut // straight pieces per river reach when measuring distance to its curve
     static final double BULGE = 0.5;   // cells a reach's curve can stray from the straight line between its cells
     /** What lies on top of the ground where it is not soil, sand or bare rock. */
-    public enum Cover { NONE, SALT, GRAVEL, SINTER, SPRING, CLIFF, BANK, SCREE, POND, BARE_ICE, MORAINE, ASH, IGNIMBRITE, CHIMNEY, CHIMNEY_CAP } // BARE_ICE, MORAINE on glacier ice, from format 40; ASH from 86; IGNIMBRITE (soil over tuff) from 89; CHIMNEY, CHIMNEY_CAP (bare tuff, its hard cap) from 90
+    public enum Cover { NONE, SALT, GRAVEL, SINTER, SPRING, CLIFF, BANK, SCREE, POND, BARE_ICE, MORAINE, ASH, IGNIMBRITE, CHIMNEY, CHIMNEY_CAP, TRAVERTINE } // BARE_ICE, MORAINE on glacier ice, from format 40; ASH from 86; IGNIMBRITE (soil over tuff) from 89; CHIMNEY, CHIMNEY_CAP (bare tuff, its hard cap) from 90; TRAVERTINE from 91
 
     public static final int WATER_COLOR = 0x1e46b4, LAVA_COLOR = 0xff5a14, GLACIER_COLOR = 0xc8e6f5;
     static final float GLACIER_MELT = -1;      // °C annual mean at a valley floor: colder, and today's glaciers still fill it
@@ -314,6 +319,8 @@ public final class Terrain {
     private final boolean ignimbrites;    // tuff under the soil of supervolcanoes' ignimbrite plains (sim): format 89
     private final float[] tuff;           // format 89: 0..1 per cell, how much of it a supervolcano's ignimbrite covers
     private final boolean chimneys;       // fairy chimneys on the ignimbrite's slopes; ash and tuff ground gullied and screed like bare ground: format 90
+    private final boolean travertines;    // travertine terraces where hot springs rise on graben faults: format 91
+    private final java.util.concurrent.ConcurrentHashMap<Integer, Travertine> springSites = new java.util.concurrent.ConcurrentHashMap<>(); // format 91: each site square's terraces, or NO_TRAVERTINE
     private final List<float[]> sheets = new ArrayList<>(); // format 90: each supervolcano's ignimbrite {u, v (cells), radius (blocks), mean land round it (metres)}
     private final float[] bay, silt;      // format 37: land mask blurred wide (above 0.5 in a bay); river sand reaching the coast
     private final java.util.concurrent.ConcurrentHashMap<Long, java.util.concurrent.CompletableFuture<Column[]>> relaxedTiles = new java.util.concurrent.ConcurrentHashMap<>();
@@ -463,6 +470,7 @@ public final class Terrain {
         maars = data.format >= 88;
         ignimbrites = data.format >= 89;
         chimneys = data.format >= 90;
+        travertines = data.format >= 91;
         coneStyle = blownFlanks ? Volcano.BLOWN : smoothCones ? Volcano.SMOOTH_SCARS : variedVolcanoes ? Volcano.VARIED : Volcano.ROUND;
         snowLine = data.format >= 18;
         iceCapBelow = data.format >= 8 ? Biome.ICE_CAP_BELOW : Biome.OLD_ICE_CAP_BELOW;
@@ -968,8 +976,16 @@ public final class Terrain {
                     ground += spire >> 1;
                     cover = (spire & 1) != 0 ? Cover.CHIMNEY_CAP : Cover.CHIMNEY;
                 }
-                tile[x + z * RELAX_TILE] = ground == c.ground() && cover == c.cover() && ice == c.ice() ? c
-                        : new Column(ground, c.water(), c.lava(), ice > ground ? ice : Column.NO_WATER, c.biome(), c.fold(), c.volcanic(), c.rock(), cover);
+                int water = c.water();
+                int[] terrace = travertines && water == Column.NO_WATER && c.lava() == Column.NO_WATER ? travertine(x0 + x, z0 + z) : null;
+                if (terrace != null) {
+                    ground = terrace[0];
+                    water = terrace[1];
+                    ice = Column.NO_WATER;
+                    cover = Cover.TRAVERTINE;
+                }
+                tile[x + z * RELAX_TILE] = ground == c.ground() && cover == c.cover() && ice == c.ice() && water == c.water() ? c
+                        : new Column(ground, water, c.lava(), ice > ground ? ice : Column.NO_WATER, c.biome(), c.fold(), c.volcanic(), c.rock(), cover);
             }
         return tile;
     }
@@ -979,13 +995,6 @@ public final class Terrain {
         return c == Cover.NONE || chimneys && (c == Cover.ASH || c == Cover.IGNIMBRITE);
     }
 
-    /**
-     * From format 90: a fairy chimney at real block (x, z), as (blocks it rises << 1) | 1 on its cap, or 0. Rain cut the
-     * soft tuff of an ignimbrite down its valley sides and left columns standing where a harder bed capped them
-     * (Cappadocia). Laid after rockfall, which would crumble anything this thin, and only on dry ground, so it opens
-     * nothing. Each CHIMNEY_GRID site decides at its middle from the plain columns (cs, which every tile computes alike),
-     * so a chimney is whole or absent and tiles agree where they meet. (wx, wz): real block of cs[0].
-     */
     /** Format 90: metres the ignimbrite plain stands at here (the land round its caldera plus the sheet), or NaN off it. */
     private float plainLevel(double x, double z) {
         float level = Float.NaN;
@@ -996,6 +1005,106 @@ public final class Terrain {
         return level;
     }
 
+    /** Format 91: a spring's terraces: its source (real blocks), the unit vector down the slope, length, each pool's water level. */
+    private record Travertine(int x, int z, float dx, float dz, float len, int[] levels) {}
+    private static final Travertine NO_TRAVERTINE = new Travertine(0, 0, 0, 0, 0, null);
+
+    /**
+     * From format 91: travertine terraces at real block (x, z), as {ground, water (or NO_WATER)}, or null. Where a
+     * graben's fault brings hot water up through limestone, the water loses its CO2 as it runs down the scarp and drops
+     * calcite in rims that dam it into a stair of shallow pools (Pamukkale, on the Denizli graben's fault). Each pool's
+     * level is its land's mean, and the site has none where the land stands off that by more than TRAV_TOL, or holds
+     * water, lava or ice. A column beside a lower pool, or past the terraces' edge, is a rim as high as the highest
+     * pool beside it, so water only ever meets rims at least its height, or falls into a lower pool. Laid after
+     * rockfall from whole sites decided on the plain columns, so tiles agree where they meet.
+     */
+    private int[] travertine(int x, int z) {
+        int gx = Math.floorDiv(x, TRAV_GRID), gz = Math.floorDiv(z, TRAV_GRID), cells = span * zoom / TRAV_GRID;
+        for (int dz = -1; dz <= 1; dz++)
+            for (int dx = -1; dx <= 1; dx++) {
+                int key = Math.floorMod(gx + dx, cells) * 5953 + (gz + dz) * 81799 + 31; // repeats around the planet
+                if (hash01(key) > TRAV_CHANCE) continue;
+                int sx = (gx + dx) * TRAV_GRID, sz = (gz + dz) * TRAV_GRID; // the square's corner
+                if (hyp(wrapBlocks((x - sx - TRAV_GRID / 2) / (double) zoom) * zoom, z - sz - TRAV_GRID / 2) > TRAV_GRID / 2 + 2 * TRAV_LENGTH) continue;
+                Travertine t = springSites.computeIfAbsent(key, k -> travertineSite(k, sx, sz));
+                int k = t.levels == null ? -1 : terrace(t, x, z);
+                if (k < 0) continue;
+                int high = t.levels[k];
+                boolean rim = false;
+                for (int[] o : new int[][]{{1, 0}, {-1, 0}, {0, 1}, {0, -1}}) {
+                    int n = terrace(t, x + o[0], z + o[1]);
+                    rim |= n < 0 || n > k;
+                    if (n >= 0) high = Math.max(high, t.levels[n]);
+                }
+                return rim ? new int[]{high, Column.NO_WATER} : new int[]{t.levels[k] - 1, t.levels[k]};
+            }
+        return null;
+    }
+
+    /** Format 91: which of t's pools real block (x, z) lies in, or -1 off the terraces. Rims curve with the noise. */
+    private int terrace(Travertine t, int x, int z) {
+        double ox = wrapBlocks((x - t.x) / (double) zoom) * zoom, oz = z - t.z, a = ox * t.dx + oz * t.dz, c = Math.abs(oz * t.dx - ox * t.dz);
+        double sx = x / (double) zoom, sz = z / (double) zoom;
+        if (a < 0 || a >= t.len || c >= TRAV_HALF + TRAV_SPREAD * a + 2 * fine(sx, sz, 16, 95)) return -1;
+        return Math.clamp((int) Math.floor((a + 1.5 * fine(sx, sz, 8, 94)) / TRAV_POOL), 0, t.levels.length - 1);
+    }
+
+    /**
+     * Format 91: the terraces of the site square with real corner (cx, cz), or NO_TRAVERTINE: the spring rises at the
+     * first point of a TRAV_STEP lattice over the square's middle half (in an order of its own) on a fault scarp.
+     */
+    private Travertine travertineSite(int key, int cx, int cz) {
+        if (!grabens) return NO_TRAVERTINE;
+        int px = 0, pz = 0, n = TRAV_GRID / 2 / TRAV_STEP, start = (int) (n * n * hash01(key + 1));
+        float sx = 0, sz = 0, g = 0;
+        for (int i = 0; i < n * n && g == 0; i++) {
+            px = cx + TRAV_GRID / 4 + (start + i) % (n * n) % n * TRAV_STEP;
+            pz = cz + TRAV_GRID / 4 + (start + i) % (n * n) / n * TRAV_STEP;
+            double x = px / (double) zoom, z = pz / (double) zoom, u = warpU(x, z), v = warpV(x, z);
+            float stretch = cubic(data.backArc, u, v);
+            if (stretch < TRAV_STRETCH) continue;
+            float[] b = faultBlock(x, z, u, v, stretch);
+            if (b[0] < HORST / 2 || b[1] < 0.15f || b[1] > 0.85f) continue; // on a fault scarp, where the hot water comes up
+            sx = column(px + 6, pz).ground() - column(px - 6, pz).ground();
+            sz = column(px, pz + 6).ground() - column(px, pz - 6).ground();
+            if (Math.hypot(sx, sz) >= 2) g = (float) Math.hypot(sx, sz);
+        }
+        if (g == 0) return NO_TRAVERTINE;
+        float len = TRAV_LENGTH * (0.7f + 0.6f * hash01(key + 3));
+        Travertine t = new Travertine(px, pz, -sx / g, -sz / g, len, new int[(int) (len / TRAV_POOL) + 2]);
+        int pools = t.levels.length;
+        float[] sum = new float[pools];
+        int[] count = new int[pools];
+        List<int[]> seen = new ArrayList<>();
+        for (float a = -4; a < len + 4; a += 2)
+            for (float c = -TRAV_HALF - TRAV_SPREAD * len - 5; c <= TRAV_HALF + TRAV_SPREAD * len + 5; c += 2) {
+                if (Math.abs(c) > TRAV_HALF + TRAV_SPREAD * Math.max(a, 0) + 5) continue;
+                int qx = Math.round(px + a * t.dx - c * t.dz), qz = Math.round(pz + a * t.dz + c * t.dx);
+                Column s = column(qx, qz);
+                if (s.water() != Column.NO_WATER || s.lava() != Column.NO_WATER || s.ice() != Column.NO_WATER || s.volcanic()) return NO_TRAVERTINE;
+                int k = terrace(t, qx, qz);
+                if (k < 0) continue;
+                sum[k] += s.ground();
+                count[k]++;
+                seen.add(new int[]{k, s.ground()});
+            }
+        if (count[0] == 0) return NO_TRAVERTINE;
+        for (int k = 0; k < pools; k++) {
+            int level = count[k] > 0 ? Math.round(sum[k] / count[k]) : t.levels[k - 1];
+            t.levels[k] = k > 0 ? Math.min(level, t.levels[k - 1]) : level; // never up the slope
+        }
+        if (t.levels[pools - 1] <= SEA_Y + 2) return NO_TRAVERTINE;
+        for (int[] s : seen) if (Math.abs(s[1] - t.levels[s[0]]) > TRAV_TOL) return NO_TRAVERTINE;
+        return t;
+    }
+
+    /**
+     * From format 90: a fairy chimney at real block (x, z), as (blocks it rises << 1) | 1 on its cap, or 0. Rain cut the
+     * soft tuff of an ignimbrite down its valley sides and left columns standing where a harder bed capped them
+     * (Cappadocia). Laid after rockfall, which would crumble anything this thin, and only on dry ground, so it opens
+     * nothing. Each CHIMNEY_GRID site decides at its middle from the plain columns (cs, which every tile computes alike),
+     * so a chimney is whole or absent and tiles agree where they meet. (wx, wz): real block of cs[0].
+     */
     private int chimney(Column[] cs, int n, int wx, int wz, int x, int z) {
         int gx = Math.floorDiv(x, CHIMNEY_GRID), gz = Math.floorDiv(z, CHIMNEY_GRID), cells = span * zoom / CHIMNEY_GRID, best = 0;
         for (int dz = -1; dz <= 1; dz++)

@@ -136,6 +136,7 @@ public final class TectonicChunkGenerator extends ChunkGenerator {
             ROCK = new Surface(null, null, false),
             ASH = new Surface(Blocks.TUFF.defaultBlockState(), Blocks.TUFF.defaultBlockState(), false), // fresh ash fall (format 86): no soil yet
             CHIMNEY_CAP = new Surface(Blocks.ANDESITE.defaultBlockState(), Blocks.TUFF.defaultBlockState(), false), // a fairy chimney's hard cap (format 90)
+            TRAVERTINE = new Surface(Blocks.CALCITE.defaultBlockState(), Blocks.CALCITE.defaultBlockState(), false), // a hot spring's terraces (format 91)
             SCREE_STONE = new Surface(Blocks.COBBLESTONE.defaultBlockState(), Blocks.GRAVEL.defaultBlockState(), false),
             MAGMA_PATCH = new Surface(Blocks.MAGMA_BLOCK.defaultBlockState(), null, false); // hot rock breaking through an active volcano's ground (format 58)
 
@@ -419,6 +420,7 @@ public final class TectonicChunkGenerator extends ChunkGenerator {
 
     private static Surface surface(Terrain.Column c, int slope, boolean wet) {
         if (c.cover() == Terrain.Cover.SPRING) return SPRING; // soul sand sends up streams of bubbles, like steam
+        if (c.cover() == Terrain.Cover.TRAVERTINE) return TRAVERTINE; // white calcite rims and pool floors (format 91)
         if (c.cover() == Terrain.Cover.CHIMNEY) return ROCK; // a fairy chimney's bare tuff (format 90)
         if (c.cover() == Terrain.Cover.CHIMNEY_CAP) return CHIMNEY_CAP; // the harder rock that capped it
         if (c.cover() == Terrain.Cover.SINTER) return (c.ground() & 1) == 0 ? SINTER : SINTER_STAINED;
@@ -532,7 +534,7 @@ public final class TectonicChunkGenerator extends ChunkGenerator {
 
     /** Hot springs and their sinter stay clear of snow. */
     private static boolean warmGround(Surface s) {
-        return s == SPRING || s == SINTER || s == SINTER_STAINED || s == MAGMA_PATCH;
+        return s == SPRING || s == SINTER || s == SINTER_STAINED || s == MAGMA_PATCH || s == TRAVERTINE;
     }
 
     /**
