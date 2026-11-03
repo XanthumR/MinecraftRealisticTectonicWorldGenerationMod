@@ -134,6 +134,7 @@ public final class TectonicChunkGenerator extends NoiseBasedChunkGenerator {
             CLAY = new Surface(Blocks.CLAY.defaultBlockState(), Blocks.DIRT.defaultBlockState(), false),
             SNOW_PACK = new Surface(Blocks.SNOW_BLOCK.defaultBlockState(), Blocks.PACKED_ICE.defaultBlockState(), false),
             ROCK = new Surface(null, null, false),
+            ASH = new Surface(Blocks.TUFF.defaultBlockState(), Blocks.TUFF.defaultBlockState(), false), // fresh ash fall (format 86): no soil yet
             SCREE_STONE = new Surface(Blocks.COBBLESTONE.defaultBlockState(), Blocks.GRAVEL.defaultBlockState(), false),
             MAGMA_PATCH = new Surface(Blocks.MAGMA_BLOCK.defaultBlockState(), null, false); // hot rock breaking through an active volcano's ground (format 58)
 
@@ -427,6 +428,7 @@ public final class TectonicChunkGenerator extends NoiseBasedChunkGenerator {
             default -> false;
         };
         if (c.volcanic() && !snowy) return ROCK; // bare lava and ash; snow-capped summits keep their snow
+        if (c.cover() == Terrain.Cover.ASH && !snowy) return ASH;
         return switch (c.biome()) {
             case DESERT -> SAND;
             case ICE_CAP, SNOWY_PEAKS, SNOWY_SLOPES, JAGGED_PEAKS, SNOWY_PLAINS, ICE_SPIKES -> SNOW_PACK;

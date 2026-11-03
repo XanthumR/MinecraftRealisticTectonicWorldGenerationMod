@@ -73,6 +73,10 @@ public final class Terrain {
     static final float CINDER_RADIUS = 22, CINDER_STEEP = 0.5f; // blocks across a cinder cone's base, half; height per block of radius
     static final float DOME_SHARE = 0.4f;   // of arc volcanoes with a lava dome in their crater: format 81
     static final float HUMMOCKS = 8;        // format 85: blocks the tallest mound of a debris avalanche stands over its sheet
+    static final float ASH_VENT = 0.5f;     // format 86: of a cone's radius: ash lies all round the vent out to here
+    static final float ASH_REACH = 1.6f;    // of a cone's radius: how far downwind the ash blanket reaches
+    static final float ASH_FAN = 0.25f;     // half-width the plume's fallout gains per radius downwind, over ASH_VENT at the vent
+    static final float ASH_EDGE = 0.35f;    // thickness (0..1) below which the ground shows through: the blanket's ragged edge
     static final float DOME_RADIUS = 0.5f, DOME_RISE = 1, DOME_LUMPS = 3; // of the crater's radius and depth (both varied); blocks of blocky rubble on top
     static final float LAKE_SHORE_RISE = 24; // blocks the ground may rise across a lake's shore band, from the water up
     static final float LAKE_CUT_MAX = 48;    // blocks above its surface beyond which a lake leaves the land standing (format 30)
@@ -102,6 +106,8 @@ public final class Terrain {
     static final float ICE_EDGE = 12;     // blocks below the land the ice surface sinks at cells without ice, so glaciers thin to their edges
     static final float ICE_DRAPE = 12;    // blocks of ice at most over the rock, ~180 m at Mountains 1.0 (format 55; from 56 over the rock blurred ICE_BLUR wide)
     static final double MAGMA_REACH = 0.6; // share of an active cone's reach out to which magma breaks through its ground in patches (format 58)
+    static final float MAGMA_CRATER = 2;    // format 87: of the crater's radius: the hot ground round the vent, rim and all
+    static final float MAGMA_FLANK = 0.15f; // format 87: heat left on the flanks out to MAGMA_REACH: a few steaming vents, not a rash
     static final int ICE_BLUR = 8;        // blocks: half-width of each of the two box means the rock is blurred by under glacier ice (format 56)
     static final float ICE_SUMMER_MAX = 15; // °C: summers this warm melt any glacier tongue that reaches them
     static final float LAKE_SILL = 0.25f;   // cells: width of the rock sill between two lakes at different levels
@@ -170,7 +176,7 @@ public final class Terrain {
     static final float CANYON_CUT = 0.8f, CANYON_MAX = 50; // canyon depth: share of the height above CANYON_HEIGHT; deepest cut // straight pieces per river reach when measuring distance to its curve
     static final double BULGE = 0.5;   // cells a reach's curve can stray from the straight line between its cells
     /** What lies on top of the ground where it is not soil, sand or bare rock. */
-    public enum Cover { NONE, SALT, GRAVEL, SINTER, SPRING, CLIFF, BANK, SCREE, POND, BARE_ICE, MORAINE } // the last two on glacier ice, from format 40
+    public enum Cover { NONE, SALT, GRAVEL, SINTER, SPRING, CLIFF, BANK, SCREE, POND, BARE_ICE, MORAINE, ASH } // BARE_ICE, MORAINE on glacier ice, from format 40; ASH from 86
 
     public static final int WATER_COLOR = 0x1e46b4, LAVA_COLOR = 0xff5a14, GLACIER_COLOR = 0xc8e6f5;
     static final float GLACIER_MELT = -1;      // °C annual mean at a valley floor: colder, and today's glaciers still fill it
@@ -288,6 +294,8 @@ public final class Terrain {
     private final boolean smoothCones;    // collapse scars of even width, crater floors meet their own rim, peaks fade over lakes, lakes one biome: format 42
     private final int coneStyle;          // Volcano.ROUND, VARIED, SMOOTH_SCARS or BLOWN by format
     private final boolean blownFlanks;    // blown volcanoes: horseshoe craters, debris avalanches with hummocks, a dome in the young ones: format 85
+    private final boolean ashFall;        // erupting arc volcanoes' ash blown downwind: format 86
+    private final boolean hotCraters;     // magma patches round the crater, only a few vents on the flanks: format 87
     private final float[] bay, silt;      // format 37: land mask blurred wide (above 0.5 in a bay); river sand reaching the coast
     private final java.util.concurrent.ConcurrentHashMap<Long, java.util.concurrent.CompletableFuture<Column[]>> relaxedTiles = new java.util.concurrent.ConcurrentHashMap<>();
     private final java.util.concurrent.ConcurrentLinkedQueue<Long> tileOrder = new java.util.concurrent.ConcurrentLinkedQueue<>();
@@ -431,6 +439,8 @@ public final class Terrain {
         calderaWalls = data.format >= 63;
         widthMask = (data.w & (data.w - 1)) == 0 ? data.w - 1 : -1;
         blownFlanks = data.format >= 85;
+        ashFall = data.format >= 86;
+        hotCraters = data.format >= 87;
         coneStyle = blownFlanks ? Volcano.BLOWN : smoothCones ? Volcano.SMOOTH_SCARS : variedVolcanoes ? Volcano.VARIED : Volcano.ROUND;
         snowLine = data.format >= 18;
         iceCapBelow = data.format >= 8 ? Biome.ICE_CAP_BELOW : Biome.OLD_ICE_CAP_BELOW;
@@ -1023,6 +1033,9 @@ public final class Terrain {
     /**
      * From format 58: whether real block (x, z) on an active volcano is a patch of magma, where hot rock and gas break
      * through cracks and vents. Patches a few blocks across, most round the crater, fewer down to MAGMA_REACH of the cone.
+     * From format 87 the hot ground is round the crater (its dome, its rim) and the flanks keep only a few vents:
+     * the flank heat filled a blown volcano's whole horseshoe with patches, walls and all (x 15888 z 11231, seed 777),
+     * where Mount St Helens' crater is cold rock and ash round its glowing dome.
      */
     public boolean magmaPatch(int realX, int realZ) {
         if (!magmaVents) return false;
@@ -1031,7 +1044,11 @@ public final class Terrain {
         for (Cone c : conesNear(x, z)) {
             if (!c.v().active() || c.collapsed()) continue;
             double d = hyp(wrapBlocks(x - c.x()), z - c.z());
-            heat = Math.max(heat, 1 - smoothstep((float) (d / (MAGMA_REACH * c.reach()))));
+            float flank = 1 - smoothstep((float) (d / (MAGMA_REACH * c.reach())));
+            if (hotCraters) {
+                flank = Math.max(MAGMA_FLANK * flank, 1 - smoothstep((float) (d / (MAGMA_CRATER * c.craterRadius))));
+            }
+            heat = Math.max(heat, flank);
         }
         return heat > 0 && fine(x, z, 8, 91) + 0.5f * fine(x, z, 4, 92) > 1.1f - 0.6f * heat;
     }
@@ -1162,6 +1179,24 @@ public final class Terrain {
             }
         }
         return natural;
+    }
+
+    /**
+     * From format 86: whether an erupting arc volcano's ash covers this column. Sticky arc magma erupts explosively; the
+     * plume rises into the high winds and the ash falls out downwind, thickest near the vent and thinning with distance
+     * (Mount St Helens' ash went east with the westerlies, Pinatubo's west with the trades). Too fresh for soil, so it is
+     * bare tuff; noise breaks up its thin edge. Hotspot shields erupt runny basalt, with little ash.
+     */
+    private boolean ash(double x, double z) {
+        for (Cone c : conesNear(x, z)) {
+            if (!c.v.active() || c.v.hotspot() || c.collapsed) continue;
+            double lat = Math.abs(Climate.latitude(Math.round(c.v.v()), h)), dx = wrapBlocks(x - c.x) / c.radius, dz = (z - c.z) / c.radius;
+            double along = lat > 30 && lat < 60 ? dx : -dx; // westerlies blow east, trades and polar easterlies west
+            float near = 1 - (float) (Math.hypot(dx, dz) / ASH_VENT), half = ASH_VENT + ASH_FAN * (float) along;
+            float plume = along > 0 && along < ASH_REACH ? (1 - (float) along / ASH_REACH) * (1 - smoothstep((float) Math.abs(dz) / half)) : 0;
+            if (Math.max(near, plume) + 0.3f * fine(x, z, 16, 93) > ASH_EDGE) return true;
+        }
+        return false;
     }
 
     /**
@@ -1741,6 +1776,7 @@ public final class Terrain {
         if (forestVariety && cover == Cover.CLIFF && (biome == Biome.BADLANDS || biome == Biome.WOODED_BADLANDS || biome == Biome.DESERT))
             biome = Biome.ERODED_BADLANDS; // canyon walls
         if (scree && river.edge > SCREE_RIVER && cover == Cover.NONE && water == Column.NO_WATER && lava == Column.NO_WATER && ice == Column.NO_WATER) cover = Cover.SCREE;
+        if (ashFall && cover == Cover.NONE && !volcanic && water == Column.NO_WATER && ice == Column.NO_WATER && ground > SEA_Y + 1 && ash(x, z)) cover = Cover.ASH;
         return new Column(ground, water, lava, ice, biome, fold, volcanic, rock, cover);
     }
 
