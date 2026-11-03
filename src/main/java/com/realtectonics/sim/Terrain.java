@@ -72,6 +72,7 @@ public final class Terrain {
     static final int CALDERA_AGE = 120, CINDER_AGE = 60;  // shields older than this have worn their caldera away; younger than this still sprout cinder cones
     static final float CINDER_RADIUS = 22, CINDER_STEEP = 0.5f; // blocks across a cinder cone's base, half; height per block of radius
     static final float DOME_SHARE = 0.4f;   // of arc volcanoes with a lava dome in their crater: format 81
+    static final float HUMMOCKS = 8;        // format 85: blocks the tallest mound of a debris avalanche stands over its sheet
     static final float DOME_RADIUS = 0.5f, DOME_RISE = 1, DOME_LUMPS = 3; // of the crater's radius and depth (both varied); blocks of blocky rubble on top
     static final float LAKE_SHORE_RISE = 24; // blocks the ground may rise across a lake's shore band, from the water up
     static final float LAKE_CUT_MAX = 48;    // blocks above its surface beyond which a lake leaves the land standing (format 30)
@@ -285,7 +286,8 @@ public final class Terrain {
     private final boolean calderaWalls;   // neighbouring cones' shaping fades across a caldera's edge instead of stopping at it: format 63
     public final boolean fastMath;        // distances by a plain square root instead of Math.hypot (same to the last bit or two); caves sealed from water only near it: format 43
     private final boolean smoothCones;    // collapse scars of even width, crater floors meet their own rim, peaks fade over lakes, lakes one biome: format 42
-    private final int coneStyle;          // Volcano.ROUND, VARIED or SMOOTH_SCARS by format
+    private final int coneStyle;          // Volcano.ROUND, VARIED, SMOOTH_SCARS or BLOWN by format
+    private final boolean blownFlanks;    // blown volcanoes: horseshoe craters, debris avalanches with hummocks, a dome in the young ones: format 85
     private final float[] bay, silt;      // format 37: land mask blurred wide (above 0.5 in a bay); river sand reaching the coast
     private final java.util.concurrent.ConcurrentHashMap<Long, java.util.concurrent.CompletableFuture<Column[]>> relaxedTiles = new java.util.concurrent.ConcurrentHashMap<>();
     private final java.util.concurrent.ConcurrentLinkedQueue<Long> tileOrder = new java.util.concurrent.ConcurrentLinkedQueue<>();
@@ -428,7 +430,8 @@ public final class Terrain {
         wrappedRims = data.format >= 62;
         calderaWalls = data.format >= 63;
         widthMask = (data.w & (data.w - 1)) == 0 ? data.w - 1 : -1;
-        coneStyle = smoothCones ? Volcano.SMOOTH_SCARS : variedVolcanoes ? Volcano.VARIED : Volcano.ROUND;
+        blownFlanks = data.format >= 85;
+        coneStyle = blownFlanks ? Volcano.BLOWN : smoothCones ? Volcano.SMOOTH_SCARS : variedVolcanoes ? Volcano.VARIED : Volcano.ROUND;
         snowLine = data.format >= 18;
         iceCapBelow = data.format >= 8 ? Biome.ICE_CAP_BELOW : Biome.OLD_ICE_CAP_BELOW;
         w = data.w;
@@ -589,7 +592,9 @@ public final class Terrain {
             float kept = smoothCones && !legacy ? Math.clamp((groundY[cell(Math.round(v.u()), Math.round(v.v()))] - baseY) / Math.max(1, topY - baseY), 0, 1) : 1;
             rim = baseY + kept * (rim - baseY);
             // Lava domes: an arc volcano's sticky lava piles up over the vent instead of flowing away (Mount St Helens).
-            float dome = volcanoKinds && !v.hotspot() && !collapsed && hash01(key + 40) < DOME_SHARE ? craterRadius * DOME_RADIUS * (0.8f + 0.4f * hash01(key + 41)) : 0;
+            // From format 85 every erupting blown volcano grows one in its horseshoe (Mount St Helens since 1980).
+            float dome = volcanoKinds && !v.hotspot() && !collapsed && (hash01(key + 40) < DOME_SHARE || blownFlanks && v.blown() && v.active())
+                    ? craterRadius * DOME_RADIUS * (0.8f + 0.4f * hash01(key + 41)) : 0;
             Cone cone = new Cone(placed, cx, cz, radius, craterRadius, craterDepth, height, legacy, caldera, cinders, collapsed, softCeiling(rim),
                     variedVolcanoes ? Volcano.LOBE_MAX : 1, baseY, kept, dome, softCeiling(rim) - craterDepth * (1 - DOME_RISE * (0.8f + 0.6f * hash01(key + 42))), new float[]{Float.NaN});
             // Listed over the whole footprint once lava flows and hot springs reach past the summit.
@@ -1141,6 +1146,7 @@ public final class Terrain {
         float open = 1 - (calderaWalls ? inside : 0);
         for (Cone c : simCalderas && !low ? conesNear(x, z) : List.<Cone>of()) {
             double d = hyp(wrapBlocks(x - c.x), z - c.z);
+            if (blownFlanks && !c.collapsed) natural += hummocks(c, x, z);
             if (c.collapsed || c.legacy || d >= c.reach()) continue;
             float s = coneY(c, x, z) + rough * (1 + 0.02f * c.height), fade = open * overLake * smoothstep((float) ((c.reach() - d) / (0.1 * c.radius)));
             if (s > natural) natural += fade * (s - natural);
@@ -1156,6 +1162,16 @@ public final class Terrain {
             }
         }
         return natural;
+    }
+
+    /**
+     * From format 85: the hummocks of a blown volcano's debris avalanche. The flank that slid away broke into blocks
+     * that came to rest as a field of mounds, tallest near the scar (Mount St Helens' North Fork Toutle, Shasta's
+     * hummocks); the sheet itself is the simulation's. Only raises the land, so no hollow holds water it can't.
+     */
+    private float hummocks(Cone c, double x, double z) {
+        double f = c.v.debris(wrapBlocks(x - c.x), z - c.z);
+        return f <= 0 ? 0 : HUMMOCKS * (float) Math.sqrt(f) * Math.max(0, fine(x, z, 16, 91) + 0.5f * fine(x, z, 8, 92));
     }
 
     /**

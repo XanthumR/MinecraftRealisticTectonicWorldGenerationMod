@@ -210,7 +210,7 @@ public final class Hydrology {
         for (Volcano v : planet.volcanoes())
             if (!v.gone()) volcanoes.add(v.withBase(Planet.metres(elevation[(int) v.u() + (int) v.v() * w])));
         // Overlapping cones blend with a smooth maximum, so neighbours in a chain merge without a straight crease.
-        float[] cones = new float[n];
+        float[] cones = new float[n], debris = new float[n];
         Arrays.fill(cones, Float.NaN);
         for (Volcano placed : volcanoes) {
             if (placed.supervolcano()) continue; // its magma pooled underground: no cone
@@ -221,7 +221,8 @@ public final class Hydrology {
                     double d = Math.hypot(dx, dy);
                     if (d >= radius || cv + dy < 0 || cv + dy >= h) continue;
                     int g = Math.floorMod(cu + dx, w) + (cv + dy) * w;
-                    float s = placed.surfaceMetres(dx * Terrain.BLOCKS_PER_CELL, dy * Terrain.BLOCKS_PER_CELL, Volcano.SMOOTH_SCARS);
+                    float s = placed.surfaceMetres(dx * Terrain.BLOCKS_PER_CELL, dy * Terrain.BLOCKS_PER_CELL, Volcano.BLOWN);
+                    debris[g] = Math.max(debris[g], Volcano.DEBRIS_THICK * placed.riseMetres() * (float) placed.debris(dx * Terrain.BLOCKS_PER_CELL, dy * Terrain.BLOCKS_PER_CELL));
                     if (s <= placed.baseMetres()) continue; // past this side's footprint
                     cones[g] = Float.isNaN(cones[g]) ? s : smoothMax(cones[g], s, CONE_BLEND);
                 }
@@ -229,6 +230,9 @@ public final class Hydrology {
         float[] before = elevation.clone();
         for (int g = 0; g < n; g++)
             if (!Float.isNaN(cones[g])) elevation[g] = Math.max(elevation[g], Planet.fromMetres(cones[g]));
+        // From format 85 a blown volcano's debris avalanche lies on the land below its scar, valleys and all.
+        for (int g = 0; g < n; g++)
+            if (debris[g] > 0) elevation[g] = Planet.fromMetres(Planet.metres(elevation[g]) + debris[g]);
         return before;
     }
 

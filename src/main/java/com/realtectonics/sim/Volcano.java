@@ -93,7 +93,35 @@ public record Volcano(float u, float v, boolean hotspot, int age, float size, fl
     static final float SCAR_DEPTH = 0.35f;  // of the height a collapse scar takes off the summit
     static final double SCAR_HALF = 0.45;   // radians: half the scar's width (format 36)
     static final double SCAR_WIDTH = 0.25;  // of the footprint radius: half the scar's width (format 42)
-    public static final int ROUND = 0, VARIED = 1, SMOOTH_SCARS = 2; // cone styles: before format 36, formats 36-41, from 42
+    public static final int ROUND = 0, VARIED = 1, SMOOTH_SCARS = 2, BLOWN = 3; // cone styles: before format 36, formats 36-41, 42-84, from 85
+    static final float BLAST_SHARE = 0.5f;  // format 85: share of scarred volcanoes whose flank blew out sideways (Mount St Helens 1980)
+    static final float BLAST_DEPTH = 0.5f;  // of the height a blast takes off the summit: a horseshoe crater, not a notch
+    static final float BLAST_WIDTH = 0.35f; // of the footprint radius: half the horseshoe's width
+    static final float DEBRIS_THICK = 0.06f; // of the volcano's rise: the debris avalanche's thickness on its axis (~200 m)
+    static final double DEBRIS_FROM = 0.6, DEBRIS_FULL = 1.3, DEBRIS_TO = 1.7; // of the footprint radius: where the lobe starts, thins, ends
+    static final double DEBRIS_FAN = 0.4;   // half-width the lobe gains per radius it runs out: it spreads as it slows
+
+    private boolean scarred() {
+        return !hotspot && roll(7) < SCAR_SHARE;
+    }
+
+    /** From format 85: whether the scar was blown out: the flank slid away and the summit blew out sideways after it. */
+    public boolean blown() {
+        return scarred() && roll(12) < BLAST_SHARE;
+    }
+
+    /**
+     * From format 85: 0..1, how thick the debris avalanche of a blown volcano lies dx, dz blocks from its summit. The
+     * flank that slid away ran out beyond the scar's mouth as a lobe that fans out and thins at its toe; it is laid on
+     * whatever land is there (Hydrology.buildCones), so rivers cut it like any other ground.
+     */
+    public double debris(double dx, double dz) {
+        if (!blown()) return 0;
+        double r = radiusBlocks(), rel = Math.atan2(dz, dx) - 2 * Math.PI * roll(8), d = Math.hypot(dx, dz);
+        double along = d * Math.cos(rel) / r, across = Math.abs(d * Math.sin(rel)) / r, half = BLAST_WIDTH + DEBRIS_FAN * (along - DEBRIS_FROM);
+        if (along <= DEBRIS_FROM || along >= DEBRIS_TO) return 0;
+        return smooth((along - DEBRIS_FROM) / 0.2) * (1 - smooth((along - DEBRIS_FULL) / (DEBRIS_TO - DEBRIS_FULL))) * (1 - smooth(across / half));
+    }
 
     /** 0..1, fixed per volcano and per k: what makes this volcano unlike its neighbours. */
     private double roll(int k) {
@@ -117,12 +145,13 @@ public record Volcano(float u, float v, boolean hotspot, int age, float size, fl
         double drop = hotspot ? Math.pow(t, 1.6 + 0.8 * roll(6)) : Math.pow(t, 0.4 + 0.35 * roll(6)); // shields domed like Hawaii, strato cones concave like Fuji
         float b0 = Terrain.defaultBlocks(baseMetres), b1 = Terrain.defaultBlocks(baseMetres + riseMetres());
         double scar = 0;
-        if (!hotspot && roll(7) < SCAR_SHARE) {
+        if (scarred()) {
+            boolean blast = style == BLOWN && blown();
             double rel = a - 2 * Math.PI * roll(8);
             if (style == VARIED) scar = SCAR_DEPTH * (1 - smooth(Math.abs(Math.IEEEremainder(rel, 2 * Math.PI)) / SCAR_HALF)) * (1 - smooth(t / 0.7));
             else { // from format 42 the scar is a trough of even width in blocks: an angle squeezed its walls into a blade at the summit
                 double side = Math.cos(rel) > 0 ? Math.abs(d * Math.sin(rel)) : d; // behind the summit only its head bites in
-                scar = SCAR_DEPTH * (1 - smooth(side / (SCAR_WIDTH * radiusBlocks()))) * (1 - smooth(t / 0.7));
+                scar = (blast ? BLAST_DEPTH : SCAR_DEPTH) * (1 - smooth(side / ((blast ? BLAST_WIDTH : SCAR_WIDTH) * radiusBlocks()))) * (1 - smooth(t / 0.7));
             }
         }
         return Terrain.defaultMetres(b0 + (b1 - b0) * (float) (1 - drop - scar));
