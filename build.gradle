@@ -22,6 +22,7 @@ dependencies {
     runtimeOnly 'maven.modrinth:biomes-o-plenty:BtZKRp69' // version ids: the version numbers are shared with the Forge builds
     runtimeOnly 'maven.modrinth:terrablender:6e8GCrLb'
     runtimeOnly 'maven.modrinth:glitchcore:S2TfWrZR'
+    runtimeOnly 'maven.modrinth:geophilic:5kFV8CEz' // 3.7: denser vanilla biomes; only biome files, no overworld override, so our generator stays
     testImplementation platform('org.junit:junit-bom:5.11.4')
     testImplementation 'org.junit.jupiter:junit-jupiter'
     testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
