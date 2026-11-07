@@ -23,6 +23,8 @@ import net.minecraft.world.level.biome.BiomeManager;
 import net.minecraft.world.level.biome.BiomeSource;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.SnowyDirtBlock;
+import net.minecraft.world.level.block.VineBlock;
+import net.minecraft.world.level.block.state.properties.BooleanProperty;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.chunk.ChunkAccess;
 import net.minecraft.world.level.chunk.ChunkGenerator;
@@ -316,6 +318,7 @@ public final class TectonicChunkGenerator extends NoiseBasedChunkGenerator {
                     }
                     section.setBlockState(lx, y & 15, lz, state, false);
                 }
+                if (wet && c.cover() == Terrain.Cover.CENOTE) hangVines(chunk, cols, i, c, x0 + lx, z0 + lz, lx, lz);
                 // Where a river steps down a block, let the edge water flow when the chunk loads: rapids, not a frozen wall.
                 // From format 54 only falls of two or more: over a one-block step the water spreads as a sheet on the water below,
                 // and at each inner corner of a diagonal step, between two sources, Minecraft makes it a new source that spreads on.
@@ -469,6 +472,35 @@ public final class TectonicChunkGenerator extends NoiseBasedChunkGenerator {
     }
 
     /** 0..1 for a block: which of a deposit's blocks are ore, and which vanilla ores stay (format 92). */
+    static final int VINE_WALL = 3;          // blocks a cenote's wall must stand over the water to grow vines (format 96)
+    static final float VINE_SHARE = 0.7f;    // share of wall columns with a strand
+    private static final int[] SIDE = {-1, 1, -18, 18};
+    private static final BooleanProperty[] FACE = {VineBlock.WEST, VineBlock.EAST, VineBlock.NORTH, VineBlock.SOUTH};
+
+    /**
+     * Format 96: vines hang from a cenote's rim down its walls toward the water, as in the Yucatan's open cenotes (Ik Kil):
+     * each strand from the top of its wall, its own length, some walls bare. Placed in the open shaft above the water,
+     * clinging to whichever neighbours rise as walls; cols are the chunk's columns with a one-column margin.
+     */
+    private static void hangVines(ChunkAccess chunk, Terrain.Column[] cols, int i, Terrain.Column c, int x, int z, int lx, int lz) {
+        int[] from = new int[4];
+        int highest = Integer.MIN_VALUE;
+        for (int k = 0; k < 4; k++) {
+            Terrain.Column wall = cols[i + SIDE[k]];
+            int span = wall.ground() - c.water();
+            from[k] = Integer.MAX_VALUE;
+            if (wall.water() >= wall.ground() || span < VINE_WALL || oreHash(x, 1000 + k, z) > VINE_SHARE) continue;
+            from[k] = wall.ground() - (int) (oreHash(x, 2000 + k, z) * span); // the strand's lowest block
+            highest = Math.max(highest, wall.ground());
+        }
+        for (int y = c.water() + 1; y <= Math.min(highest, chunk.getMaxBuildHeight() - 1); y++) {
+            BlockState vine = null;
+            for (int k = 0; k < 4; k++)
+                if (y >= from[k] && y <= cols[i + SIDE[k]].ground()) vine = (vine == null ? Blocks.VINE.defaultBlockState() : vine).setValue(FACE[k], true);
+            if (vine != null) chunk.setBlockState(new BlockPos(x, y, z), vine, false);
+        }
+    }
+
     static float oreHash(int x, int y, int z) {
         long h = (x * 0x9E3779B97F4A7C15L) ^ (y * 0xC2B2AE3D27D4EB4FL) ^ (z * 0x165667B19E3779F9L);
         h = (h ^ (h >>> 31)) * 0xBF58476D1CE4E5B9L;

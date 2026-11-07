@@ -14,6 +14,8 @@ one before trusting it.
 | `rockfall.jsh` | Tiles agree where they overlap (seams 0), tile time, leak edges (0); default spot is seed 777's highest ice-free peak (spawn moves with the climate, so a fixed spot can end up on flat land) |
 | `overshoot.jsh` | Rockfall never piles rubble above its source (0) |
 | `lakeleak.jsh` | Lake water never next to lower dry ground (seed 777: 1, a lake stepping into its own outlet river; seeds 1-4: 0); the thorough one |
+| `cenotes.jsh` | Cenotes (format 96) over an area against format 95: new pools by size, water and rim, rubble beside, spilling edges and the new ones (0), pools with two levels (0): `-Dplanet -Dseed -Dcx -Dcz -Dn` |
+| `oases.jsh` | Oases (format 95) over the whole planet round every `oasisField` cell: spilling edges round each (0) and pools not brim-full (0): `-Dplanet -Dseed -Dfmt` |
 | `falls.jsh` | Water spilling onto dry land (baseline 16 on the planet since colliding land stays with its plate, 5 since format 79; 12 column edges since the latest climate changes reshaped seed 777, 4 and 23 before; perched river banks, open) |
 | `pondscan.jsh` | Pond spills (0) |
 | `calderas.jsh` | Caldera lake spills (0); every crater's lava or rainwater pool spilling (0 at format 83-84, 3 at 82, 1 from 85: a river's perched bank over a blown summit; `-Dfmt=N`); from format 81 supervolcanoes (seed 777: 3), lava domes (46, 47 from 85) and domes in a lake or lava (0) |

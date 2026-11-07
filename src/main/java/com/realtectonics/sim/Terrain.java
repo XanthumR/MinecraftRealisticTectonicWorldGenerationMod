@@ -182,9 +182,18 @@ public final class Terrain {
     static final float SHORE_FULL = 0.15f, LAKE_TAPER = 40; // lake mask above which the shore stands at the surface; blocks it falls by the outer edge
     static final int POND_GRID = 128;                        // blocks: at most one pond per square this size
     static final float POND_RAIN = 450, POND_CHANCE = 0.3f, POND_LEVEL = 2, POND_BERM = 2; // mm a year; share of squares with a pond at most; blocks a rim may tilt
+    static final float OASIS_RAIN = 250, OASIS_FLOW = 2, OASIS_WARM = 5; // format 95: mm a year below which springs make oases; flow (Hydrology.flow) a seep must gather, twice that for a sure one; °C below which the desert is polar (tundra), no oases
+    static final float OASIS_CHANCE = 0.4f; static final int OASIS_SPREAD = 1; // format 95: share of pond squares over a sure aquifer with a pool (0.8 felt too common); cells out from the wadi a pool may sit
+    static final float OASIS_MM = 900, OASIS_REACH = 24;     // format 95: rain-equivalent the spring gives round its pool; blocks past the berm its green ring reaches
+    static final float OASIS_LOBES = 0.45f, OASIS_BAYS = 0.2f; // format 95: how far an oasis pool's shore swings in and out, as a share of its radius: broad lobes, small bays
+    static final float OASIS_SMALL = 3, OASIS_BIG = 14, OASIS_STRETCH = 3; // format 95: blocks of an oasis pool's radius, most near the small end; up to 1 + this times as long as wide (a lake between dunes)
+    static final float OASIS_BELT = 0.25f, OASIS_FAR = 80;  // format 95: the narrowest green belt as a share of OASIS_REACH (a small pool's few trees); blocks from a pool's middle past which nothing of it reaches
+    static final int OASIS_NEAR = 4;                        // format 95: cells round the spring field where an oasis may reach: OASIS_FAR and the warp's drift, rounded up
     static final int KARST_GRID = 64;                       // blocks: at most one sinkhole per square this size
     static final float KARST_RAIN = 500, KARST_CHANCE = 0.35f; // mm: limestone dissolves above this; share of squares with a sinkhole at most
     static final float CENOTE_RAIN = 1200, CENOTE_SHARE = 0.4f; // wet karst: share of sinkholes that are water-filled cenotes
+    static final float[] CENOTE_SIZE = {2.5f, 7, 10, 7};     // format 96: blocks, a typical radius of a jug's mouth, a cylinder, an aguada, a half-fallen cave
+    static final float CENOTE_TABLE = 0.15f, CENOTE_DEEPEST = 16, CENOTE_MOUND = 0.4f; // format 96: blocks deeper the water lies per block the rim stands above the sea, the most; share of cylinders and caves with a rubble mound
     static final float BRAID_WIDTH = 2, BRAID_BARS = 0.25f;   // braided meltwater rivers: how much wider, and how much of them is gravel bar
     static final float OXBOW_FLOW = 300;                      // rivers this big leave oxbow lakes on their floodplains
     static final int OXBOW_RISE = 2;                          // blocks a bank may stand above the river and still be floodplain an oxbow lies on (format 51)
@@ -204,7 +213,7 @@ public final class Terrain {
     static final float CANYON_CUT = 0.8f, CANYON_MAX = 50; // canyon depth: share of the height above CANYON_HEIGHT; deepest cut // straight pieces per river reach when measuring distance to its curve
     static final double BULGE = 0.5;   // cells a reach's curve can stray from the straight line between its cells
     /** What lies on top of the ground where it is not soil, sand or bare rock. */
-    public enum Cover { NONE, SALT, GRAVEL, SINTER, SPRING, CLIFF, BANK, SCREE, POND, BARE_ICE, MORAINE, ASH, IGNIMBRITE, CHIMNEY, CHIMNEY_CAP, TRAVERTINE } // BARE_ICE, MORAINE on glacier ice, from format 40; ASH from 86; IGNIMBRITE (soil over tuff) from 89; CHIMNEY, CHIMNEY_CAP (bare tuff, its hard cap) from 90; TRAVERTINE from 91
+    public enum Cover { NONE, SALT, GRAVEL, SINTER, SPRING, CLIFF, BANK, SCREE, POND, BARE_ICE, MORAINE, ASH, IGNIMBRITE, CHIMNEY, CHIMNEY_CAP, TRAVERTINE, CENOTE } // BARE_ICE, MORAINE on glacier ice, from format 40; ASH from 86; IGNIMBRITE (soil over tuff) from 89; CHIMNEY, CHIMNEY_CAP (bare tuff, its hard cap) from 90; TRAVERTINE from 91; CENOTE (a cenote's water, vines on its walls) from 96
 
     public static final int WATER_COLOR = 0x1e46b4, LAVA_COLOR = 0xff5a14, GLACIER_COLOR = 0xc8e6f5;
     static final float GLACIER_MELT = -1;      // °C annual mean at a valley floor: colder, and today's glaciers still fill it
@@ -334,6 +343,8 @@ public final class Terrain {
     private final boolean tongueRivers;   // lava tongues never fill a river's channel: format 93
     private final boolean lakeBanks;      // a lake's shore slope never cuts a river's bank below its water: format 93
     private final boolean flatErgs;       // no dune seas: the user found the ridges' block steps striping the sand (format 94)
+    private final boolean oases;          // spring-fed pools in a green ring where groundwater rises in desert (oasisField): format 95
+    private final boolean variedCenotes;  // cenotes as jugs, cylinders, aguadas and half-fallen caves, deeper inland, one level each (karst()): format 96
     private final float[] placer;         // format 92: per cell, share of a river bed's blocks that are gold washed from a deposit upstream
     private volatile byte[] depositCells; // format 92: per cell, the Deposits.Kind ordinal it holds or -1, for the map and /tectonic (lazy)
     private final java.util.concurrent.ConcurrentHashMap<Integer, Travertine> springSites = new java.util.concurrent.ConcurrentHashMap<>(); // format 91: each site square's terraces, or NO_TRAVERTINE
@@ -352,6 +363,8 @@ public final class Terrain {
     private final float[] cliffy, barriers; // per cell, blurred: hard high coasts that end in cliffs, soft low ones with barrier islands
     private final float[] riverLevel;    // per cell: river water level in blocks; below the ground where a dry upland's river cut a canyon
     private final int[] mainDonor;       // per cell: the upstream neighbour bringing the most water, or -1
+    private final float[] oasisField;    // per cell, 0-1: how readily a desert pool is spring-fed here (format 95), spread a cell out
+    private final boolean[] oasisNear;   // per cell: an oasis's pool, berm or green may reach here (OASIS_NEAR cells round the field), so pond() must run
     private final CellMap<Delta> deltasByCell = new CellMap<>(); // by warped cell
     private final CellMap<Fan> deltasByCellFans = new CellMap<>(); // alluvial fans, by warped cell
 
@@ -492,6 +505,8 @@ public final class Terrain {
         tongueRivers = data.format >= 93;
         lakeBanks = data.format >= 93;
         flatErgs = data.format >= 94;
+        oases = data.format >= 95;
+        variedCenotes = data.format >= 96;
         coneStyle = blownFlanks ? Volcano.BLOWN : smoothCones ? Volcano.SMOOTH_SCARS : variedVolcanoes ? Volcano.VARIED : Volcano.ROUND;
         snowLine = data.format >= 18;
         iceCapBelow = data.format >= 8 ? Biome.ICE_CAP_BELOW : Biome.OLD_ICE_CAP_BELOW;
@@ -723,6 +738,25 @@ public final class Terrain {
             Fan fan = new Fan(c % w, c / w, du / len, dv / len, FAN_RADIUS * zoom, groundY[c] + 2);
             for (int dy = -3; dy <= 3; dy++)
                 for (int dx = -3; dx <= 3; dx++) deltasByCellFans.add(cell(c % w + dx, c / w + dy), fan);
+        }
+        // Oases (format 95): in warm desert the rain of a whole catchment soaks into the floor of its wadi and runs on under
+        // it; where enough has gathered the water table stands close enough to the surface for a hollow to hold it (the
+        // Draa and Ziz valleys, the Tafilalt). Hydrology's flow is that gathered rain. Where a river runs, its banks are
+        // green already (format 38); polar desert has no oases.
+        oasisField = oases ? new float[w * h] : null;
+        oasisNear = oases ? new boolean[w * h] : null;
+        if (oases) {
+            float[] seep = new float[w * h];
+            for (int c = 0; c < w * h; c++) {
+                if (data.metres[c] < 0 || data.ice[c] != 0 || !Float.isNaN(data.lakeMetres[c]) || data.flow[c] >= Hydrology.RIVER_AREA || data.temperature[c] < OASIS_WARM) continue;
+                seep[c] = smoothstep((OASIS_RAIN - data.precipitation[c]) / 100) * smoothstep(data.flow[c] / OASIS_FLOW - 1);
+            }
+            for (int c = 0; c < w * h; c++) // a cell out, so a pool can sit anywhere on the valley floor
+                for (int dy = -OASIS_SPREAD; dy <= OASIS_SPREAD; dy++)
+                    for (int dx = -OASIS_SPREAD; dx <= OASIS_SPREAD; dx++) oasisField[c] = Math.max(oasisField[c], seep[cell(c % w + dx, c / w + dy)]);
+            for (int c = 0; c < w * h; c++)
+                for (int dy = -OASIS_NEAR; oasisField[c] > 0 && dy <= OASIS_NEAR; dy++)
+                    for (int dx = -OASIS_NEAR; dx <= OASIS_NEAR; dx++) oasisNear[cell(c % w + dx, c / w + dy)] = true;
         }
         for (int c = 0; lowlandRivers && !noDeltas && c < w * h; c++) { // from format 49 none: rivers meet the sea at a plain mouth
             int r = data.receiver[c];
@@ -2061,52 +2095,21 @@ public final class Terrain {
                 if (level > ground && water == Column.NO_WATER) water = level;
             }
         }
-        // Karst: rain dissolves limestone from below; the roof falls in as sinkholes, or as water-filled cenotes.
-        if (landforms && water == Column.NO_WATER && ground > SEA_Y + 3 && rain > KARST_RAIN && river.edge > 10 && lakeness < 0.01f
-                && Rock.of(data.rock[cell((int) Math.round(u), (int) Math.round(v))]) == Rock.BASIN) {
-            int gx = (int) Math.floor(x / KARST_GRID), gz = (int) Math.floor(z / KARST_GRID), cells = span / KARST_GRID;
-            for (int dz = -1; dz <= 1; dz++)
-                for (int dx = -1; dx <= 1; dx++) {
-                    int key = Math.floorMod(gx + dx, cells) * 7919 + (gz + dz) * 104729; // repeats around the planet
-                    if (hash01(key) > KARST_CHANCE * smoothstep((rain - KARST_RAIN) / 600)) continue;
-                    double px = (gx + dx + 0.2 + 0.6 * hash01(key + 1)) * KARST_GRID, pz = (gz + dz + 0.2 + 0.6 * hash01(key + 2)) * KARST_GRID;
-                    if (maars && !conesNear(px, pz).isEmpty()) continue; // from format 88: lava over the limestone; a sinkhole dug beside a maar's lake (x 15631 z 11347)
-                    double d = hyp(wrapBlocks(x - px), z - pz), radius = 3 + 4 * hash01(key + 3);
-                    if (d >= radius) continue;
-                    int depth = 4 + Math.round(8 * hash01(key + 4));
-                    if (hash01(key + 5) < CENOTE_SHARE && rain > CENOTE_RAIN) { // a sheer shaft down to the water table
-                        water = ground - 4;
-                        ground -= depth + 4;
-                    } else ground -= Math.round(depth * (float) Math.pow(1 - d * d / (radius * radius), 0.7)); // a bowl
-                }
+        // Karst: rain dissolves limestone from below; the roof falls in as sinkholes, or as water-filled cenotes. From format
+        // 96 a cenote is judged at its middle (rock, river, lake, rain), so each is whole: the columns only skip the dry lands.
+        if (landforms && water == Column.NO_WATER && ground > SEA_Y + 3 && (variedCenotes ? ponds && rain > 0.8f * KARST_RAIN && river.edge > 10
+                : rain > KARST_RAIN && river.edge > 10 && lakeness < 0.01f && Rock.of(data.rock[cell((int) Math.round(u), (int) Math.round(v))]) == Rock.BASIN)) {
+            int[] k = karst(x, z, ground, rain);
+            ground = k[0];
+            water = k[1];
+            if (k[2] != 0) cover = k[2] == 1 ? Cover.SCREE : Cover.CENOTE;
         }
-        // Ponds: small hollows in wet, level ground hold rainwater. The level sits a block under the lowest point of the
-        // rim, only level rims get one, and a low berm closes the rim, so a pond never spills. Everything that decides
-        // whether a pond is there is read at its middle, so each pond is whole or absent.
-        if (ponds && folds && water == Column.NO_WATER && lava == Column.NO_WATER && ice == Column.NO_WATER && rain > 0.8f * POND_RAIN) { // the middle decides; this only skips the dry lands
-            int gx = (int) Math.floor(x / POND_GRID), gz = (int) Math.floor(z / POND_GRID), cells = span / POND_GRID;
-            for (int dz = -1; dz <= 1; dz++)
-                for (int dx = -1; dx <= 1; dx++) {
-                    int key = Math.floorMod(gx + dx, cells) * 6007 + (gz + dz) * 92639 + 17; // repeats around the planet
-                    if (hash01(key) > POND_CHANCE) continue;
-                    double px = (gx + dx + 0.2 + 0.6 * hash01(key + 1)) * POND_GRID, pz = (gz + dz + 0.2 + 0.6 * hash01(key + 2)) * POND_GRID;
-                    double d = hyp(wrapBlocks(x - px), z - pz), radius = (4 + 6 * hash01(key + 3)) / zoom;
-                    if (d >= radius + POND_BERM) continue;
-                    double cu = warpU(px, pz), cv = warpV(px, pz);
-                    float wet = bilinear(data.precipitation, cu, cv);
-                    if (hash01(key) > POND_CHANCE * smoothstep((wet - POND_RAIN) / 800) || cubic(lakes, cu, cv) > 0.01f
-                            || !conesNear(px, pz).isEmpty() || riverAt(px, pz, cu, cv).edge < radius + POND_BERM + 4) continue;
-                    int level = pondLevel(key, px, pz, radius);
-                    if (level == Integer.MIN_VALUE) continue;
-                    int depth = 2 + Math.round(2 * hash01(key + 4));
-                    if (d >= radius) { // the berm
-                        ground = Math.max(ground, level);
-                        continue;
-                    }
-                    ground = Math.min(ground, level - Math.max(1, Math.round(depth * (float) Math.sqrt(1 - d * d / (radius * radius)))));
-                    water = level;
-                    cover = Cover.POND;
-                }
+        float spring = 0; // mm of rain an oasis's groundwater stands in for round its pool (format 95)
+        if (ponds && folds && water == Column.NO_WATER && lava == Column.NO_WATER && ice == Column.NO_WATER && (rain > 0.8f * POND_RAIN || oases && oasisNear[cell((int) Math.round(u), (int) Math.round(v))])) { // the middle decides; this only skips the dry lands
+            int[] p = pond(x, z, ground);
+            ground = p[0];
+            if (p[1] != Column.NO_WATER) { water = p[1]; cover = Cover.POND; }
+            spring = p[2];
         }
         // Horns: four flat faces meeting in a point, cut back by the cirques around the summit.
         if (landforms && !(calderas && crater)) for (Horn horn : hornsByCell.get(cell((int) Math.floor(originX + 0.5 + x / (double) BLOCKS_PER_CELL),
@@ -2179,8 +2182,9 @@ public final class Terrain {
         // From format 38 a river waters its banks from below: through a desert it runs in a green strip (the Nile), wider
         // and greener the bigger the river.
         float big = wetBanks && river != NO_RIVER ? (float) Math.sqrt(Math.min(1, river.flow() / RIPARIAN_FLOW)) : 0;
-        float banks = big > 0 ? RIPARIAN_MM * big * (1 - smoothstep(Math.max(0, river.edge()) / (RIPARIAN_REACH * big))) : 0;
+        float banks = (big > 0 ? RIPARIAN_MM * big * (1 - smoothstep(Math.max(0, river.edge()) / (RIPARIAN_REACH * big))) : 0) + spring;
         Biome biome = marsh && ground >= SEA_Y - 2 ? marsh(x, z, u, v) : biome(x, z, u, v, Math.max(organic && !(landforms && smooth < SEA_Y && ground >= SEA_Y) ? Math.min(ground, smooth) : ground, ice), banks);
+        if (spring > OASIS_MM / 2) biome = Biome.OASIS; // its own trees and grass, whatever forest the climate would grow on that water; the drier fringe takes the climate's
         if (richBiomes && water != Column.NO_WATER && water >= ground) {
             if ((inRiver || smoothCones && lakeness > SHORE_FULL) && water >= SEA_Y) biome = winterLook(u, v, temperature(u, v, water)) < 0 ? Biome.FROZEN_RIVER : Biome.RIVER; // from 42 lakes too: one water colour
         } else if (richBiomes && !marsh && ice == Column.NO_WATER && ground <= SEA_Y + 2 && shore > -0.05f && shore < SHORE_BAND) {
@@ -2369,6 +2373,157 @@ public final class Terrain {
         return need <= 0 ? 10 : rain / need;
     }
 
+    /**
+     * Sinkholes where rain dissolves limestone from below: {ground, water or NO_WATER, 1 where the fallen roof lies bare, 2 a cenote's water}.
+     * Before format 96 every cenote was the same sheer shaft with its water 4 blocks under each column's own ground. From 96
+     * they come in Hall's (1936) kinds from the Yucatan: (A) a jug, a small hole over a wide chamber, here a narrow deep well
+     * (a column holds no overhang); (B) a cylinder, sheer walls down to the water (Ik Kil, the Sacred Cenote); (C) an
+     * aguada, an old one whose walls fell in, a shallow basin with sloping banks; (D) a half-fallen cave, reached down the
+     * rubble of its roof. Cylinders and caves may keep a mound of that rubble standing out of the water. The water table
+     * stays near sea level, so the higher the rim the deeper the shaft. Each takes one level from the lowest of its rim, and
+     * a berm closes the rim as round a pond, so none spills; the outline wanders.
+     */
+    private int[] karst(double x, double z, int ground, float rain) {
+        int water = Column.NO_WATER, rubble = 0;
+        int gx = (int) Math.floor(x / KARST_GRID), gz = (int) Math.floor(z / KARST_GRID), cells = span / KARST_GRID;
+        for (int dz = -1; dz <= 1; dz++)
+            for (int dx = -1; dx <= 1; dx++) {
+                int key = Math.floorMod(gx + dx, cells) * 7919 + (gz + dz) * 104729; // repeats around the planet
+                if (hash01(key) > KARST_CHANCE * smoothstep((rain - KARST_RAIN) / 600)) continue;
+                double px = (gx + dx + 0.2 + 0.6 * hash01(key + 1)) * KARST_GRID, pz = (gz + dz + 0.2 + 0.6 * hash01(key + 2)) * KARST_GRID;
+                if (maars && !conesNear(px, pz).isEmpty()) continue; // from format 88: lava over the limestone; a sinkhole dug beside a maar's lake (x 15631 z 11347)
+                double d = hyp(wrapBlocks(x - px), z - pz);
+                if (variedCenotes && hash01(key + 5) < CENOTE_SHARE) {
+                    int kind = (int) (4 * hash01(key + 6)); // 0 jug, 1 cylinder, 2 aguada, 3 half-fallen cave
+                    double r = CENOTE_SIZE[kind] * (0.6 + 0.8 * hash01(key + 3)) / zoom;
+                    if (d >= 1.5 * r + POND_BERM + 1) continue;
+                    double a = Math.atan2(z - pz, wrapBlocks(x - px)), shore = cenoteShore(px, pz, r, a);
+                    if (d >= shore + POND_BERM) continue;
+                    int lo = karstSite(key, px, pz, r, true);
+                    if (lo == Integer.MIN_VALUE) continue;
+                    int level = lo - (kind == 2 ? 2 + Math.round(hash01(key + 4)) : Math.round(Math.min(CENOTE_DEEPEST, 3 + CENOTE_TABLE * (lo - SEA_Y)) * (0.7f + 0.6f * hash01(key + 4))) + (kind == 0 ? 4 : 0));
+                    if (d >= shore) { // the berm
+                        ground = Math.max(ground, level);
+                        continue;
+                    }
+                    double t = d / shore;
+                    int floor = level - Math.max(1, (int) Math.round((2 + 5 * hash01(key + 9)) * Math.sqrt(1 - t * t)));
+                    if (kind == 2 && t > 0.4) floor = Math.max(floor, level - 1 + (int) Math.round((lo + 2 - level) * Math.pow((t - 0.4) / 0.6, 1.3))); // banks sloping to the water
+                    if (kind == 3 && t > 0.3 && Math.cos(a - 2 * Math.PI * hash01(key + 10)) > 0.5) { // the fallen roof: a rubble ramp down to the water
+                        int ramp = level - 1 + (int) Math.round((lo - level + 1) * (t - 0.3) / 0.7);
+                        if (ramp > floor) { floor = ramp; rubble = 1; }
+                    }
+                    if (kind % 2 == 1 && t < 0.45 && hash01(key + 11) < CENOTE_MOUND) { // the roof's rubble, piled where it fell: an islet
+                        int mound = level + 2 - (int) Math.round(8 * (t / 0.45) * (t / 0.45));
+                        if (mound > floor) { floor = mound; rubble = 1; }
+                    }
+                    ground = Math.min(ground, floor);
+                    if (ground < level) { water = level; rubble = 2; } // the generator hangs vines over it
+                    continue;
+                }
+                double radius = 3 + 4 * hash01(key + 3);
+                if (d >= radius || variedCenotes && karstSite(key, px, pz, radius, false) == Integer.MIN_VALUE) continue;
+                int depth = 4 + Math.round(8 * hash01(key + 4));
+                if (!variedCenotes && hash01(key + 5) < CENOTE_SHARE && rain > CENOTE_RAIN) { // a sheer shaft down to the water table
+                    water = ground - 4;
+                    ground -= depth + 4;
+                } else ground -= Math.round(depth * (float) Math.pow(1 - d * d / (radius * radius), 0.7)); // a bowl
+            }
+        return new int[]{ground, water, rubble};
+    }
+
+    /** A cenote's shore, blocks from its middle in direction a: about r, wandering by a third in lobes and bays. */
+    private double cenoteShore(double px, double pz, double r, double a) {
+        return r * (1 + 0.3 * fine(px + 12 * Math.cos(a), pz + 12 * Math.sin(a), 16, 107) + 0.15 * fine(px + 6 * Math.cos(a), pz + 6 * Math.sin(a), 4, 108));
+    }
+
+    private final ThreadLocal<long[]> lastKarst = ThreadLocal.withInitial(() -> new long[]{Long.MIN_VALUE, 0}); // sinkhole key, its rim
+
+    /**
+     * Format 96: whether a sinkhole is there, judged at its middle (limestone, wet enough, no river, lake or the sea near),
+     * and for a cenote the lowest ground round its rim (16 points on its wandering shore), or MIN_VALUE where there is none.
+     * Its neighbouring columns ask in turn, so the last answer is kept per thread.
+     */
+    private int karstSite(int key, double px, double pz, double r, boolean cenote) {
+        long[] last = lastKarst.get();
+        if (last[0] == key) return (int) last[1];
+        double cu = warpU(px, pz), cv = warpV(px, pz);
+        int lo = Rock.of(data.rock[cell((int) Math.round(cu), (int) Math.round(cv))]) != Rock.BASIN || cubic(lakes, cu, cv) > 0.01f
+                || riverAt(px, pz, cu, cv).edge < r + 10 || bilinear(data.precipitation, cu, cv) < (cenote ? CENOTE_RAIN : KARST_RAIN) ? Integer.MIN_VALUE : Integer.MAX_VALUE;
+        for (int k = 0; cenote && lo != Integer.MIN_VALUE && k < 16; k++) {
+            double a = k * Math.PI / 8, s = cenoteShore(px, pz, r, a) + 0.5;
+            Column c = column(px + s * Math.cos(a), pz + s * Math.sin(a), false);
+            double sx = px + s * Math.cos(a), sz = pz + s * Math.sin(a); // and no river near its rim: a river's columns keep their own ground, so its banks would break the berm
+            lo = c.water() != Column.NO_WATER || c.lava() != Column.NO_WATER || c.ice() != Column.NO_WATER || c.ground() < SEA_Y + 4
+                    || riverAt(sx, sz, warpU(sx, sz), warpV(sx, sz)).edge < 12 ? Integer.MIN_VALUE : Math.min(lo, c.ground());
+        }
+        last[0] = key;
+        last[1] = lo;
+        return lo;
+    }
+
+    /**
+     * Ponds: small hollows in wet, level ground hold rainwater. The level sits a block under the lowest point of the
+     * rim, only level rims get one, and a low berm closes the rim, so a pond never spills. Everything that decides
+     * whether a pond is there is read at its middle, so each pond is whole or absent. From format 95 the same pools are
+     * oases in desert where springs rise (oasisField), in a ring of green their water keeps alive. Returns the ground,
+     * the water (NO_WATER outside a pool) and the mm of rain the spring stands in for.
+     */
+    private int[] pond(double x, double z, int ground) {
+        int water = Column.NO_WATER;
+        float green = 0;
+        int gx = (int) Math.floor(x / POND_GRID), gz = (int) Math.floor(z / POND_GRID), cells = span / POND_GRID;
+        for (int dz = -1; dz <= 1; dz++)
+            for (int dx = -1; dx <= 1; dx++) {
+                int key = Math.floorMod(gx + dx, cells) * 6007 + (gz + dz) * 92639 + 17; // repeats around the planet
+                if (hash01(key) > (oases ? OASIS_CHANCE : POND_CHANCE)) continue;
+                double px = (gx + dx + 0.2 + 0.6 * hash01(key + 1)) * POND_GRID, pz = (gz + dz + 0.2 + 0.6 * hash01(key + 2)) * POND_GRID;
+                double d = hyp(wrapBlocks(x - px), z - pz), radius = (4 + 6 * hash01(key + 3)) / zoom;
+                if (d >= (oases ? OASIS_FAR / zoom : radius + POND_BERM)) continue;
+                double cu = warpU(px, pz), cv = warpV(px, pz);
+                float wet = bilinear(data.precipitation, cu, cv), seep = oases ? bilinear(oasisField, cu, cv) : 0;
+                if (seep == 0 && d >= radius + POND_BERM) continue;
+                if (hash01(key) > Math.max(POND_CHANCE * smoothstep((wet - POND_RAIN) / 800), OASIS_CHANCE * seep) || cubic(lakes, cu, cv) > 0.01f
+                        || !conesNear(px, pz).isEmpty() || riverAt(px, pz, cu, cv).edge < radius + POND_BERM + (seep > 0 ? 1 : 4)) continue; // an oasis may lie by its wadi's creek
+                // Oases differ: a long lake between dunes in a thin line of trees, a small pool with a tree or two on bare damp
+                // ground, a broad lake in a thick belt of palms. Each takes its own size, stretch and heading; the green belt
+                // widens with the water that feeds it and narrows along a long lake.
+                if (seep > 0) radius = (OASIS_SMALL + (OASIS_BIG - OASIS_SMALL) * hash01(key + 3) * hash01(key + 3)) / zoom;
+                double shore = seep > 0 ? shore(key, px, pz, radius, Math.atan2(z - pz, wrapBlocks(x - px))) : radius; // blocks from the middle to the water's edge this way
+                int level = pondLevel(key, px, pz, radius, seep > 0);
+                if (level == Integer.MIN_VALUE) continue;
+                if (seep > 0) level++; // a spring keeps it brim-full: flush with the lowest rim, which the berm still closes
+                if (seep > 0) // the green reaches as far as the water does under the sand, out from the shore: in lobes and clumps, not a ring
+                    green = Math.max(green, OASIS_MM * (1 - smoothstep((float) Math.max(0, d - shore - POND_BERM)
+                            / (OASIS_REACH * (OASIS_BELT + (1 - OASIS_BELT) * (float) Math.sqrt(Math.max(0, radius * zoom - OASIS_SMALL) / (OASIS_BIG - OASIS_SMALL) / oasisStretch(key)) * (0.7f + 0.6f * hash01(key + 9)))
+                               * (1 + 0.6f * fine(x, z, 32, 103) + 0.25f * fine(x, z, 8, 104))))));
+                if (d >= shore + POND_BERM) continue;
+                int depth = 2 + Math.round(2 * hash01(key + 4));
+                if (d >= shore) { // the berm
+                    ground = Math.max(ground, level);
+                    continue;
+                }
+                ground = Math.min(ground, level - Math.max(1, Math.round(depth * (float) Math.sqrt(1 - d * d / (shore * shore)))));
+                water = level;
+            }
+        return new int[]{ground, water, Math.round(green)};
+    }
+
+    /**
+     * An oasis pool's shore, blocks from its middle (px, pz) in direction a: an ellipse of the pool's own stretch and heading
+     * (round to OASIS_STRETCH + 1 times as long as wide, the area kept), whose radius swings with direction (broad lobes,
+     * small bays), so each pool has its own outline yet stays one piece, and its berm still closes all round.
+     */
+    private double oasisStretch(int key) { // how many times as long as wide; the green belt narrows with it, a strip along a long lake
+        return 1 + OASIS_STRETCH * hash01(key + 7);
+    }
+
+    private double shore(int key, double px, double pz, double radius, double a) {
+        double stretch = oasisStretch(key), along = a - Math.PI * hash01(key + 8);
+        double ellipse = radius / Math.sqrt(Math.cos(along) * Math.cos(along) / stretch + stretch * Math.sin(along) * Math.sin(along));
+        return ellipse * Math.max(0.5, 1 + OASIS_LOBES * fine(px + 16 * Math.cos(a), pz + 16 * Math.sin(a), 16, 105) + OASIS_BAYS * fine(px + 8 * Math.cos(a), pz + 8 * Math.sin(a), 4, 106));
+    }
+
     private final ThreadLocal<long[]> lastPond = ThreadLocal.withInitial(() -> new long[]{Long.MIN_VALUE, 0}); // pond key, its level
 
     /**
@@ -2376,15 +2531,15 @@ public final class Terrain {
      * judged on the finished ground (rivers and valleys cut), dry and level all round, with no gully under the middle.
      * The neighbouring columns of a pond ask in turn, so the last answer is kept per thread.
      */
-    private int pondLevel(int key, double px, double pz, double radius) {
+    private int pondLevel(int key, double px, double pz, double radius, boolean oasis) {
         long[] last = lastPond.get();
         if (last[0] == key) return (int) last[1];
-        int lo = Integer.MAX_VALUE, hi = Integer.MIN_VALUE;
-        for (int k = 0; k <= 8; k++) {
-            double a = k * Math.PI / 4, r = k == 8 ? 0 : radius + 1;
+        int lo = Integer.MAX_VALUE, hi = Integer.MIN_VALUE, n = oasis ? 32 : 8; // an oasis's rim is read along its own wandering shore, closer round
+        for (int k = 0; k <= n; k++) {
+            double a = k * 2 * Math.PI / n, r = k == n ? 0 : oasis ? shore(key, px, pz, radius, a) + 0.5 : radius + 1; // an oasis's on its very bank
             Column c = column(px + r * Math.cos(a), pz + r * Math.sin(a), false);
             if (c.water() != Column.NO_WATER || c.lava() != Column.NO_WATER || c.ice() != Column.NO_WATER) { lo = Integer.MIN_VALUE; break; }
-            if (k == 8) { if (c.ground() < lo - POND_LEVEL) lo = Integer.MIN_VALUE; break; } // the middle: no hidden gully
+            if (k == n) { if (c.ground() < lo - POND_LEVEL) lo = Integer.MIN_VALUE; break; } // the middle: no hidden gully
             lo = Math.min(lo, c.ground());
             hi = Math.max(hi, c.ground());
         }
