@@ -454,7 +454,9 @@ public final class Planet {
         });
         // Rows are independent: each global cell maps to a distinct local cell of every plate.
         AtomicIntegerArray collisions = new AtomicIntegerArray(plates.length);
-        IntStream.range(0, h).parallel().forEach(y -> compositeRow(y, collisions));
+        int[] area = new int[plates.length];
+        for (int o : owner) area[o]++;
+        IntStream.range(0, h).parallel().forEach(y -> compositeRow(y, collisions, area));
         spreadEvenly();
         // Continents are too buoyant to subduct, so colliding plates grind to a halt instead of eating each other.
         for (int p = 0; p < plates.length; p++) {
@@ -796,7 +798,7 @@ public final class Planet {
     }
 
     /** Decide who owns each cell and resolve plate boundaries. */
-    private void compositeRow(int y, AtomicIntegerArray collisions) {
+    private void compositeRow(int y, AtomicIntegerArray collisions, int[] area) {
         int[] row = new int[plates.length], shift = new int[plates.length]; // local cell of x = 0 is (shift, row)
         int[] active = new int[plates.length]; // plates with any crust in this row, in index order
         int actives = 0;
@@ -813,11 +815,16 @@ public final class Planet {
             boolean subducting = false, colliding = false;
             // Continents float on top. Between two oceanic plates the higher index wins, so a
             // whole plate subducts along the boundary instead of the plates shredding cell by cell.
+            // Between two continents the plate that held the cell keeps it and the newcomer's crust folds up onto it:
+            // continents are too buoyant to be overridden, so a plate driving into one piles a range up along the
+            // suture (the Himalaya on Asia's side) and never cuts into it. The higher index used to win here too, so a
+            // small plate, or a few-cell tooth of a larger one, sawed straight through a continent and left a channel
+            // of new sea floor behind it. Where neither held it the larger plate takes it.
             for (int a = 0; a < actives; a++) {
                 int p = active[a];
                 float c = plates[p].get(wrapX(x + shift[p]), row[p]);
                 if (c > 0) present[count++] = p;
-                if (c > 0 && (best < 0 || c >= SEA_LEVEL || bestC < SEA_LEVEL)) { bestC = c; best = p; }
+                if (c > 0 && (best < 0 || bestC < SEA_LEVEL || c >= SEA_LEVEL && (owner[g] == p || owner[g] != best && area[p] >= area[best]))) { bestC = c; best = p; }
             }
             boolean spreads = best < 0;
             if (spreads) { // divergent: plates pulled apart, new crust wells up

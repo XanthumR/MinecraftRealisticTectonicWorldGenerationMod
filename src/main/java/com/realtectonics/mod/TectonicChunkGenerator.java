@@ -76,6 +76,8 @@ public final class TectonicChunkGenerator extends ChunkGenerator {
             LAVA = Blocks.LAVA.defaultBlockState(), MAGMA = Blocks.MAGMA_BLOCK.defaultBlockState(),
             PACKED_ICE = Blocks.PACKED_ICE.defaultBlockState(), BLUE_ICE = Blocks.BLUE_ICE.defaultBlockState(),
             MORAINE = Blocks.COBBLED_DEEPSLATE.defaultBlockState(); // rock debris riding on glacier ice (format 40)
+    /** Format 93: moraine is whatever the glacier scraped off, mixed, not one dark block (all bare rock, so no snow pass on it). */
+    private static final BlockState[] MORAINES = {MORAINE, MORAINE, Blocks.STONE.defaultBlockState(), Blocks.ANDESITE.defaultBlockState(), Blocks.TUFF.defaultBlockState()};
     static final int BLUE_ICE_DEPTH = 6; // glacier ice this far down is squeezed clear of air bubbles
     static final int FIRN_DEPTH = 2;     // blocks of snow and firn over glacier ice above the snow line, where it gains each winter's snow (format 57)
 
@@ -203,8 +205,26 @@ public final class TectonicChunkGenerator extends ChunkGenerator {
         return Terrain.SEA_Y;
     }
 
+    /**
+     * Where the noise step runs. Minecraft calls it from its single worldgen mailbox, one chunk at a time, and vanilla's
+     * own noise hands its work to a pool; done in place, ours held every chunk's steps behind it, and the workers sat
+     * idle three quarters of the time (JFR: ~47% CPU on 12 cores). Plain threads: the terrain tiles wait on futures, which
+     * deadlocked on a ForkJoin pool (a jshell timing on the common pool hung). The blocks don't depend on the thread.
+     */
+    private static final java.util.concurrent.ExecutorService FILL = java.util.concurrent.Executors.newFixedThreadPool(
+            Math.max(1, Runtime.getRuntime().availableProcessors() - 1), r -> {
+                Thread t = new Thread(r, "Tectonic chunk fill");
+                t.setPriority(Thread.NORM_PRIORITY - 1); // below the render and server threads, as the tile pool is (see Terrain.TILE_POOL)
+                t.setDaemon(true);
+                return t;
+            });
+
     @Override
     public CompletableFuture<ChunkAccess> fillFromNoise(Blender blender, RandomState random, StructureManager structures, ChunkAccess chunk) {
+        return CompletableFuture.supplyAsync(() -> fill(random, structures, chunk), FILL);
+    }
+
+    private ChunkAccess fill(RandomState random, StructureManager structures, ChunkAccess chunk) {
         int x0 = chunk.getPos().getMinBlockX(), z0 = chunk.getPos().getMinBlockZ(), minY = chunk.getMinY();
         Terrain.Column[] cols = columns(chunk, structures);
         int minSection = chunk.getMinSectionY();
@@ -279,7 +299,8 @@ public final class TectonicChunkGenerator extends ChunkGenerator {
                             : y == c.ground() ? (hot ? MAGMA : s.top == null ? rock(c, y) : s.top)
                             : wet ? (frozen && y == c.water() ? ICE : WATER)
                             : hot ? LAVA
-                            : glacier ? (y == c.ice() && c.cover() == Terrain.Cover.MORAINE ? MORAINE
+                            : glacier ? (y == c.ice() && c.cover() == Terrain.Cover.MORAINE
+                                    ? terrain.raggedMoraine ? MORAINES[(int) (oreHash(x0 + lx, y, z0 + lz) * MORAINES.length)] : MORAINE
                                     : firn && c.ice() - y < FIRN_DEPTH ? SNOW_BLOCK // above the snow line (no bare ice, no rubble): last winters' snow
                                     : c.ice() - y >= BLUE_ICE_DEPTH || y == c.ice() && c.cover() == Terrain.Cover.BARE_ICE ? BLUE_ICE : PACKED_ICE)
                             : SNOW;
@@ -313,7 +334,7 @@ public final class TectonicChunkGenerator extends ChunkGenerator {
                 oceanFloor.update(lx, glacier ? c.ice() : c.ground(), lz, glacier ? PACKED_ICE : surfaceBlock);
                 worldSurface.update(lx, top, lz, top == c.ground() ? surfaceBlock : wet ? WATER : hot ? LAVA : glacier ? PACKED_ICE : SNOW);
             }
-        return CompletableFuture.completedFuture(chunk);
+        return chunk;
     }
 
     /**

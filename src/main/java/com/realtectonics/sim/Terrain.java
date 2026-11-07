@@ -190,6 +190,7 @@ public final class Terrain {
     static final int OXBOW_RISE = 2;                          // blocks a bank may stand above the river and still be floodplain an oxbow lies on (format 51)
     static final float CIRQUE_WIDTH = 1.4f;              // cirque bowl radius, in trough half widths
     static final float MORAINE_HEIGHT = 10;              // blocks of rubble across a valley where its glacier ended
+    static final float MORAINE_EDGE = 2.5f, MORAINE_SWING = 3, MORAINE_CLUMP = 1.5f; // format 93: blocks of ice depth under which its edge is rubbly: mean, swing over ~32 blocks, clumps over ~8
     static final float HORN_METRES = 2500, HORN_HEIGHT = 60, HORN_RADIUS = 72; // glaciated summits above this get pyramid peaks
     static final float SALT_RAIN = 350, SALT_RISE = 3;      // mm a year below which lake shores crust with salt; blocks above the lake
     static final float DUNE_RAIN = 250, DUNE_HEIGHT = 9;    // mm a year below which sand piles into dunes this many blocks high
@@ -329,6 +330,10 @@ public final class Terrain {
     private final boolean chimneys;       // fairy chimneys on the ignimbrite's slopes; ash and tuff ground gullied and screed like bare ground: format 90
     private final boolean travertines;    // travertine terraces where hot springs rise on graben faults: format 91
     public final boolean deposits;        // ore deposits where the geology put them (Deposits), vanilla's ores thinned: format 92
+    public final boolean raggedMoraine;   // a glacier's edge rubble lies in clumps of mixed rock, not an even dark ring: format 93
+    private final boolean tongueRivers;   // lava tongues never fill a river's channel: format 93
+    private final boolean lakeBanks;      // a lake's shore slope never cuts a river's bank below its water: format 93
+    private final boolean flatErgs;       // no dune seas: the user found the ridges' block steps striping the sand (format 94)
     private final float[] placer;         // format 92: per cell, share of a river bed's blocks that are gold washed from a deposit upstream
     private volatile byte[] depositCells; // format 92: per cell, the Deposits.Kind ordinal it holds or -1, for the map and /tectonic (lazy)
     private final java.util.concurrent.ConcurrentHashMap<Integer, Travertine> springSites = new java.util.concurrent.ConcurrentHashMap<>(); // format 91: each site square's terraces, or NO_TRAVERTINE
@@ -483,6 +488,10 @@ public final class Terrain {
         chimneys = data.format >= 90;
         travertines = data.format >= 91;
         deposits = data.format >= 92;
+        raggedMoraine = data.format >= 93;
+        tongueRivers = data.format >= 93;
+        lakeBanks = data.format >= 93;
+        flatErgs = data.format >= 94;
         coneStyle = blownFlanks ? Volcano.BLOWN : smoothCones ? Volcano.SMOOTH_SCARS : variedVolcanoes ? Volcano.VARIED : Volcano.ROUND;
         snowLine = data.format >= 18;
         iceCapBelow = data.format >= 8 ? Biome.ICE_CAP_BELOW : Biome.OLD_ICE_CAP_BELOW;
@@ -1702,8 +1711,9 @@ public final class Terrain {
     /**
      * The lake's shores at a column near one (lakeness over 0.02, ly its level, sill a higher lake's when on the lip
      * between two): {ground, water, 1 if a salt flat}. Moved out of column() unchanged, to keep it small for the JIT.
+     * floor: the lowest a dry column may be cut to (format 93: a river bank's, else Integer.MIN_VALUE).
      */
-    private int[] lakeShore(float lakeness, float rain, float ly, float sill, int ground, int water) {
+    private int[] lakeShore(float lakeness, float rain, float ly, float sill, int ground, int water, int floor) {
         int salt = 0;
         if (!Float.isNaN(sill)) ground = Math.max(ground, Math.round(sill)); // the rock lip holding a higher lake above a lower one
         else if (!Float.isNaN(ly)) {
@@ -1741,6 +1751,9 @@ public final class Terrain {
                     salt = 1;
                 }
             }
+            // From format 93 the shore slope stops at a river's banks: a river coming down into the lake stands above
+            // it, and the ramp cut its banks to the lake's level, 2 blocks under the water running between them.
+            if (water == Column.NO_WATER) ground = Math.max(ground, Math.min(uncut, floor));
         }
         return new int[]{ground, water, salt};
     }
@@ -1951,13 +1964,13 @@ public final class Terrain {
             sill = near[1];
         }
         if (!Float.isNaN(ly)) { // the shores, in their own method: column() must stay under the JIT's 8,000 bytes
-            int[] lake = lakeShore(lakeness, rain, ly, sill, ground, water);
+            int[] lake = lakeShore(lakeness, rain, ly, sill, ground, water, lakeBanks && river.edge > 0 && river.edge < 1.5f ? ry - 1 : Integer.MIN_VALUE);
             ground = lake[0];
             water = lake[1];
             if (lake[2] != 0) cover = Cover.SALT;
         }
         // Dune seas in the driest deserts: long ridges across the wind (east-west here, so crests run north-south).
-        if (landforms && water == Column.NO_WATER && rain < DUNE_RAIN && ground > SEA_Y + 1 && cover == Cover.NONE) {
+        if (landforms && !flatErgs && water == Column.NO_WATER && rain < DUNE_RAIN && ground > SEA_Y + 1 && cover == Cover.NONE) {
             float erg = smoothstep((DUNE_RAIN - rain) / 100) * smoothstep(noise(x, z, 512, 40) * 2 + 0.3f);
             if (erg > 0) {
                 // x runs 4 times faster through a 4 times wider lattice: 32-block spacing east-west, 128 north-south,
@@ -2006,7 +2019,9 @@ public final class Terrain {
                 float reach = (float) (c.radius * (0.35 + 0.45 * Math.pow(Math.max(0, tongue), 0.7)));
                 if (tongue > 0.15f && d < reach) {
                     volcanic = true;
-                    ground += Math.round(2 * smoothstep((tongue - 0.15f) / 0.2f));
+                    // From format 93 not in a river's channel, as cinder cones never were: the levee's 2 blocks filled the
+                    // water there, and beside a waterfall's lower pool the river above then spilled onto the dry lava.
+                    if (!tongueRivers || water == Column.NO_WATER) ground += Math.round(2 * smoothstep((tongue - 0.15f) / 0.2f));
                 }
             }
             // Hot springs on the lower flanks of young volcanoes: steaming pools ringed by terraces of sinter.
@@ -2147,7 +2162,7 @@ public final class Terrain {
         if (flowingIce && iceSheets && ice != Column.NO_WATER && temperature(u, v, ice) + bilinear(data.amplitude, u, v) > ICE_BARE) {
             float axis = Math.abs(valley.edge + valley.half + MORAINE_WANDER * fine(x, z, 64, 90)); // real blocks from the trough's centreline
             boolean medial = valley != NO_RIVER && merged[valley.cell] && axis < MORAINE_HALF;
-            cover = medial || ice - ground <= 2 ? Cover.MORAINE : Cover.BARE_ICE;
+            cover = medial || edgeRubble(x, z, ice - ground) ? Cover.MORAINE : Cover.BARE_ICE;
         }
         if (ice != Column.NO_WATER) water = Column.NO_WATER; // the river runs out from under the snout
         if (water == Column.NO_WATER && lava == Column.NO_WATER && ice == Column.NO_WATER && ground < SEA_Y - 1) water = SEA_Y - 1;
@@ -3214,6 +3229,16 @@ public final class Terrain {
     /** Noise sized in real blocks, sampled at unzoomed (x, z): the same lattice at every zoom. */
     private float fine(double x, double z, int spacing, int salt) {
         return noise(x, z, spacing / zoom, salt);
+    }
+
+    /**
+     * Rubble on a glacier's thin edge (lateral and terminal moraines), for ice depth blocks thick. Format 40 laid it
+     * wherever the ice was 2 blocks thick or less, so every snout wore an even dark ring (the user: "circle like things").
+     * Real debris lies in heaps, dumped where the ice melted back: from format 93 how thick the rubbly ice runs varies
+     * over a few dozen blocks and in clumps, so the band widens into dirty lobes, thins and breaks off in clean ice.
+     */
+    private boolean edgeRubble(double x, double z, int depth) {
+        return depth <= (raggedMoraine ? MORAINE_EDGE + MORAINE_SWING * fine(x, z, 32, 101) + MORAINE_CLUMP * fine(x, z, 8, 102) : 2);
     }
 
     /** 2D gradient noise in unzoomed blocks; the lattice repeats every span blocks in x, so spacing must divide it (powers of two). */

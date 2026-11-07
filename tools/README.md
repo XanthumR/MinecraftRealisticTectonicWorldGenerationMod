@@ -13,13 +13,14 @@ one before trusting it.
 |---|---|
 | `rockfall.jsh` | Tiles agree where they overlap (seams 0), tile time, leak edges (0); default spot is seed 777's highest ice-free peak (spawn moves with the climate, so a fixed spot can end up on flat land) |
 | `overshoot.jsh` | Rockfall never piles rubble above its source (0) |
-| `lakeleak.jsh` | Lake water never next to lower dry ground (0); the thorough one |
-| `falls.jsh` | Water spilling onto dry land (baseline 5 since format 79; 12 column edges since the latest climate changes reshaped seed 777, 4 and 23 before; perched river banks, open) |
+| `lakeleak.jsh` | Lake water never next to lower dry ground (seed 777: 1, a lake stepping into its own outlet river; seeds 1-4: 0); the thorough one |
+| `falls.jsh` | Water spilling onto dry land (baseline 16 on the planet since colliding land stays with its plate, 5 since format 79; 12 column edges since the latest climate changes reshaped seed 777, 4 and 23 before; perched river banks, open) |
 | `pondscan.jsh` | Pond spills (0) |
 | `calderas.jsh` | Caldera lake spills (0); every crater's lava or rainwater pool spilling (0 at format 83-84, 3 at 82, 1 from 85: a river's perched bank over a blown summit; `-Dfmt=N`); from format 81 supervolcanoes (seed 777: 3), lava domes (46, 47 from 85) and domes in a lake or lava (0) |
 | `maars.jsh` | Format 88 maars: lakes, dry, breached (seed 777: 19, 4, 105), maar lake spill edges (0) and posts after rockfall (4); `-Dplanet -Dfmt` |
 | `travertine.jsh` | Format 91 travertine terraces: sites (seed 777: 7, first at x 22352 z -1408), pool columns, spill edges after rockfall (0); `-Dplanet -Dfmt` |
 | `deposits.jsh` | Format 92 ore deposits: cells per kind (seed 777: porphyry 46, kimberlite 18), the deposits map `out/deposits_map.png`, vertical slices through a porphyry stock, a kimberlite pipe and an iron field (`out/ore_*.png`); `-Dplanet -Dfmt` |
+| `orebudget.jsh` | Format 92 ore budget: deposit ore per land chunk averaged over the planet, plus vanilla's thinned ores, against vanilla (seed 777, 4 s: coal 0.74x, iron 1.42x, copper 0.39x, gold 0.47x, redstone 0.50x, lapis 0.40x, diamond 0.47x; caves not cut); `-Dplanet -Dfmt` |
 | `orecount.py` | Dev server (rcon on): ores per chunk over an n x n chunk square, `python tools/orecount.py x z n` (destroys them: a test world only). A/B a format by rewriting the first int of `world/realtectonics/planet.bin` (gzip) and deleting `region/` |
 | `blown.jsh` | Format 85: generates seed 777 into `out/p85_777.bin` and lists the blown volcanoes (15) in block coordinates with their debris lobes, for `uview3d`/`hillshade` |
 | `biomeedge.jsh` | Desert next to snow (0%) |
@@ -31,7 +32,7 @@ one before trusting it.
 | `horstspots.jsh` + `annotate.py` | Labels a `uview3d.jsh` render of fault blocks (format 76+): `horstspots.jsh` (same `-Dplanet -Dseed -Dcx -Dcz -Dn`) finds the highest horst and the scarp and graben next to it as image pixels; `python tools/annotate.py in.png out.png "title" spots.txt` draws labelled arrows |
 | `boxspill.jsh` | Water next to lower dry ground in one box (`-Dplanet -Dfmt -Dcx -Dcz -Dn`): spill check for a new feature's own area, run at the old and new format |
 | `wetgorges.jsh` | Format 74: river cells a wet gorge cut over 3 blocks and the deepest spots in blocks, for `uview3d.jsh` (seed 777: 277 cells, deepest 36; 230 dry canyon cells) |
-| `planethash.jsh` | Hash and time of a whole simulated planet (`-Dwidth`, `-Dmedium=true`, `-Dseed`): simulation refactors must keep it (seed 777 since format 79: 512 `87ecc4e3f16c62b7`, 1024 `bcb692e08c51bc5e`, 2048 `43cdb3b3d02d83a`) |
+| `planethash.jsh` | Hash and time of a whole simulated planet (`-Dwidth`, `-Dmedium=true`, `-Dseed`): simulation refactors must keep it (seed 777 since colliding land stays with the plate that held it: 512 `55f9494524cd676d`, 1024 `654fdc58787c77d6`, 2048 `319a98c38651d6e`) |
 | `continents.jsh` | Land share above 500/1000/2000/3000 m, top, rain, volcanoes, and a plate map (`-Dwidth`, `-Dmedium=true`, `-Dseed`): Medium-sized continents should match Medium (>2000 m: Medium seeds 1-6 mean 4.6%, Large medium-continents 5 seeds 5.2%) |
 | `stutter.jsh` | Render-thread stalls while 4 worldgen threads pull new tiles: run with and without `-R-XX:+UseZGC` (G1: 10 frames over 10 ms, max ~20 ms; ZGC: 0, max 6.4 ms) |
 | `baselevel.jsh` | Format 46: share of columns base level raises over an area, and by how much (any planet: `-Dplanet -Dseed -Dzoom -Dcx -Dcz -Dn`) |
@@ -57,7 +58,7 @@ one before trusting it.
 | Script | Shows |
 |---|---|
 | `view3d.jsh` | Isometric block view, seed 777 (`-Dcx -Dcz -Dn -Dv -Dname -Dfmt`) |
-| `uview3d.jsh` | The same for any planet file (`-Dplanet -Dseed -Dms -Dzoom -Drw`); salt white, scree tan |
+| `uview3d.jsh` | The same for any planet file (`-Dplanet -Dseed -Dms -Dzoom -Drw`, `-Dstart=lat,lon` for an Earth world's start place, e.g. China `35,105`); salt white, scree tan |
 | `topmap.jsh` | Fast top-down map of any planet, walls red (`-Dst` stride for big areas) |
 | `hillshade.jsh` | Top-down relief of the game terrain (relaxedColumn): gullies, scarps |
 | `strata.jsh` | Cross-section of rock beds through a fold belt |
