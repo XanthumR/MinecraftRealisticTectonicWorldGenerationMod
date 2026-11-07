@@ -113,6 +113,7 @@ public final class TectonicBiomeSource extends BiomeSource {
             case FLOWER_FOREST -> List.of(v, p + "lavender_field");
             case BEACH -> List.of(v, p + "dune_beach", v);
             case STONY_SHORE -> List.of(p + "gravel_beach", v);
+            case OASIS -> List.of(p + "tropics");                               // palms round the water
             default -> List.of();
         };
     }
@@ -134,6 +135,7 @@ public final class TectonicBiomeSource extends BiomeSource {
             case DARK_FOREST -> "old_growth_woodland";
             case WINDSWEPT_HILLS -> "highland";                       // moorland hills
             case STONY_SHORE -> "gravel_beach";
+            case OASIS -> "tropics";                                  // palms, the nearest BOP has to date palms
             default -> null;
         };
     }
@@ -158,6 +160,7 @@ public final class TectonicBiomeSource extends BiomeSource {
             case ROCKY_PEAKS -> "stony_peaks";
             case SWAMP -> "swamp";
             case MANGROVE -> "mangrove_swamp";
+            case OASIS -> "sparse_jungle";                            // the greenest small trees and bushes vanilla has: a stand-in for palms
             case RIVER -> "river";
             case FROZEN_RIVER -> "frozen_river";
             case BEACH -> "beach";

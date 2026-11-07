@@ -15,7 +15,9 @@ public enum Biome {
     BIRCH_FOREST(0x6a9e50), OLD_GROWTH_BIRCH_FOREST(0x5e9448), DARK_FOREST(0x2c5a26), FLOWER_FOREST(0x7aae4a), CHERRY_GROVE(0xe8a8c8),
     SNOWY_TAIGA(0x50786c), OLD_GROWTH_PINE_TAIGA(0x3c5e3a), BADLANDS(0xc8643c), WOODED_BADLANDS(0xa86a44), ERODED_BADLANDS(0xd27848),
     // From format 15 the ice cap is snowy plains, with ice spikes in rare patches.
-    SNOWY_PLAINS(0xf0f4f8), ICE_SPIKES(0xc8e0f8);
+    SNOWY_PLAINS(0xf0f4f8), ICE_SPIKES(0xc8e0f8),
+    // From format 95: the green round a desert spring.
+    OASIS(0x4caa3c);
 
     public final int color;
 
