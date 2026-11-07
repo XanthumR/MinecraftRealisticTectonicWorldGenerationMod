@@ -93,13 +93,28 @@ public record Volcano(float u, float v, boolean hotspot, int age, float size, fl
     static final float SCAR_DEPTH = 0.35f;  // of the height a collapse scar takes off the summit
     static final double SCAR_HALF = 0.45;   // radians: half the scar's width (format 36)
     static final double SCAR_WIDTH = 0.25;  // of the footprint radius: half the scar's width (format 42)
-    public static final int ROUND = 0, VARIED = 1, SMOOTH_SCARS = 2, BLOWN = 3; // cone styles: before format 36, formats 36-41, 42-84, from 85
+    public static final int ROUND = 0, VARIED = 1, SMOOTH_SCARS = 2, BLOWN = 3, NATURAL = 4, TUYA = 5; // cone styles: before format 36, formats 36-41, 42-84, 85-96; from 97 natural cones and tuyas
+    static final float NATURAL_LOBE_MAX = 2.4f; // format 97: widest reach over the mean footprint, small bulges and a stretched cone included
+    static final float TUYA_COLD = 6;       // °C: a volcano whose base is this cold at its latitude's sea-level temperature, less the lapse to its base,
+                                            // stood under the Ice Age ice sheet (8 °C colder, Hydrology.ICE_AGE_COOLING, below -2, ICE_ACCUMULATION)
+    static final float TUYA_ICE = 1200;     // metres: a tuya's flat top lies where the ice sheet's surface was, about this far over its base
+    static final double TUYA_TOP = 0.45, TUYA_FOOT = 0.65; // of the footprint radius: where the flat top ends, where its cliffs meet the scree apron
     static final float BLAST_SHARE = 0.5f;  // format 85: share of scarred volcanoes whose flank blew out sideways (Mount St Helens 1980)
     static final float BLAST_DEPTH = 0.5f;  // of the height a blast takes off the summit: a horseshoe crater, not a notch
     static final float BLAST_WIDTH = 0.35f; // of the footprint radius: half the horseshoe's width
     static final float DEBRIS_THICK = 0.06f; // of the volcano's rise: the debris avalanche's thickness on its axis (~200 m)
     static final double DEBRIS_FROM = 0.6, DEBRIS_FULL = 1.3, DEBRIS_TO = 1.7; // of the footprint radius: where the lobe starts, thins, ends
     static final double DEBRIS_FAN = 0.4;   // half-width the lobe gains per radius it runs out: it spreads as it slows
+
+    /**
+     * From format 97: whether it erupted under an ice sheet, as a tuya: lava meeting the ice chilled into pillows and
+     * glassy rubble walled in by the ice, until it broke through the ice's surface and spread as a flat lava cap. When
+     * the ice melted it stood as a steep-sided table mountain (Herdubreid in Iceland, the tuyas of British Columbia).
+     * h: the planet's rows, for the latitude.
+     */
+    public boolean tuya(int h) {
+        return !supervolcano() && Climate.seaLevelTemperature(Climate.latitude(Math.round(v), h)) - Climate.LAPSE_RATE * Math.max(0, baseMetres) < TUYA_COLD;
+    }
 
     private boolean scarred() {
         return !hotspot && roll(7) < SCAR_SHARE;
@@ -141,12 +156,24 @@ public record Volcano(float u, float v, boolean hotspot, int age, float size, fl
         double d = Math.hypot(dx, dz);
         if (style == ROUND) return surfaceMetres(d);
         double a = Math.atan2(dz, dx), lobes = 1 + (0.25 + 0.2 * roll(1)) * (0.5 * Math.cos(a - 7 * roll(2)) + 0.3 * Math.cos(2 * a - 7 * roll(3)) + 0.2 * Math.cos(3 * a - 7 * roll(4)));
+        if (style >= NATURAL) { // from format 97 smaller bulges too, lava that ran a little further here and there, and some cones drawn out along their line of vents
+            lobes += (0.06 + 0.06 * roll(15)) * (Math.cos(4 * a - 7 * roll(16)) + 0.7 * Math.cos(5 * a - 7 * roll(17)) + 0.5 * Math.cos(6 * a - 7 * roll(18)));
+            double along = a - Math.PI * roll(19), stretch = 1 + 0.6 * roll(20);
+            lobes /= Math.sqrt(Math.cos(along) * Math.cos(along) / stretch + stretch * Math.sin(along) * Math.sin(along));
+        }
         double t = Math.min(1, d / (radiusBlocks() * (0.8 + 0.5 * roll(5)) * lobes));
         double drop = hotspot ? Math.pow(t, 1.6 + 0.8 * roll(6)) : Math.pow(t, 0.4 + 0.35 * roll(6)); // shields domed like Hawaii, strato cones concave like Fuji
         float b0 = Terrain.defaultBlocks(baseMetres), b1 = Terrain.defaultBlocks(baseMetres + riseMetres());
+        if (style == TUYA) { // a near-flat top as high as the ice was thick, a small cone where the last eruption broke through it, cliffs, a scree apron
+            drop = t < TUYA_TOP ? 0.04 * t / TUYA_TOP - 0.06 * Math.max(0, 1 - t / 0.12)
+                    : t < TUYA_FOOT ? 0.04 + 0.78 * smooth((t - TUYA_TOP) / (TUYA_FOOT - TUYA_TOP))
+                    : 0.82 + 0.18 * Math.pow((t - TUYA_FOOT) / (1 - TUYA_FOOT), 0.6);
+            b1 = Terrain.defaultBlocks(baseMetres + Math.min(riseMetres(), TUYA_ICE));
+            return Terrain.defaultMetres(b0 + (b1 - b0) * (float) (1 - drop));
+        }
         double scar = 0;
         if (scarred()) {
-            boolean blast = style == BLOWN && blown();
+            boolean blast = style >= BLOWN && blown();
             double rel = a - 2 * Math.PI * roll(8);
             if (style == VARIED) scar = SCAR_DEPTH * (1 - smooth(Math.abs(Math.IEEEremainder(rel, 2 * Math.PI)) / SCAR_HALF)) * (1 - smooth(t / 0.7));
             else { // from format 42 the scar is a trough of even width in blocks: an angle squeezed its walls into a blade at the summit

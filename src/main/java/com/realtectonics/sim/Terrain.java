@@ -21,6 +21,7 @@ public final class Terrain {
     static final int[] DETAIL_SPACING = {256, 128, 64, 32, 16};
     static final double WARP = 1.2; // cells: bends coastlines, rivers and biome borders off the cell grid
     static final double SUMMIT = 0.4; // of a cone's radius: the part too fine for the cell grid, shaped per block
+    static final float CONE_GULLY = 6, CONE_GULLY_RING = 48; // format 97: blocks a gully cuts into a cone 100 blocks tall at most; ring its noise is read on (~35 gullies round)
     static final float HILLS = 4;     // blocks of extra hill relief per zoom step beyond 1
     static final float WIGGLE = 12, PINCH = 0.25f, RAGGED = 1.2f; // wild rivers: blocks of twist, share of width change, blocks of ragged edge
     static final float WILD_CREEK_AREA = 60;  // smaller and every cell of a plain slope grows its own creek: a comb, not a network
@@ -345,6 +346,7 @@ public final class Terrain {
     private final boolean flatErgs;       // no dune seas: the user found the ridges' block steps striping the sand (format 94)
     private final boolean oases;          // spring-fed pools in a green ring where groundwater rises in desert (oasisField): format 95
     private final boolean variedCenotes;  // cenotes as jugs, cylinders, aguadas and half-fallen caves, deeper inland, one level each (karst()): format 96
+    private final boolean naturalCones;   // volcanoes with small bulges, stretched along their vents, gullied upper flanks, a ragged summit edge; tuyas: format 97
     private final float[] placer;         // format 92: per cell, share of a river bed's blocks that are gold washed from a deposit upstream
     private volatile byte[] depositCells; // format 92: per cell, the Deposits.Kind ordinal it holds or -1, for the map and /tectonic (lazy)
     private final java.util.concurrent.ConcurrentHashMap<Integer, Travertine> springSites = new java.util.concurrent.ConcurrentHashMap<>(); // format 91: each site square's terraces, or NO_TRAVERTINE
@@ -383,9 +385,9 @@ public final class Terrain {
      */
     private record Cone(Volcano v, double x, double z, float radius, float craterRadius, float craterDepth, float height, boolean legacy,
                         boolean caldera, float[][] cinders, boolean collapsed, float rim, float lobes, float baseY, float kept, float dome, float domeTop,
-                        float[] edge, Maar[] maars) { // edge: from format 83 the rim as the land stands round the crater, NaN until first asked
-        double reach() { // lobes: from format 36 a cone reaches further down some sides
-            return legacy ? radius : SUMMIT * radius * lobes;
+                        float[] edge, Maar[] maars, int style) { // edge: from format 83 the rim as the land stands round the crater, NaN until first asked; style: Volcano's
+        double reach() { // lobes: from format 36 a cone reaches further down some sides; a tuya's cliffs are too sharp for the cells all the way down
+            return legacy ? radius : (style == Volcano.TUYA ? 1 : SUMMIT) * radius * lobes;
         }
     }
     public final int spawnCell;
@@ -507,6 +509,7 @@ public final class Terrain {
         flatErgs = data.format >= 94;
         oases = data.format >= 95;
         variedCenotes = data.format >= 96;
+        naturalCones = data.format >= 97;
         coneStyle = blownFlanks ? Volcano.BLOWN : smoothCones ? Volcano.SMOOTH_SCARS : variedVolcanoes ? Volcano.VARIED : Volcano.ROUND;
         snowLine = data.format >= 18;
         iceCapBelow = data.format >= 8 ? Biome.ICE_CAP_BELOW : Biome.OLD_ICE_CAP_BELOW;
@@ -661,6 +664,7 @@ public final class Terrain {
         for (Volcano v : data.volcanoes) {
             if (v.gone()) continue;
             boolean legacy = Float.isNaN(v.baseMetres());
+            int style = naturalCones ? v.tuya(h) ? Volcano.TUYA : Volcano.NATURAL : coneStyle;
             Volcano placed = legacy ? v.withBase(toMetres(cubic(groundY, v.u(), v.v()))) : v;
             float radius = placed.radiusBlocks(), height = toY(placed.surfaceMetres(0)) - toY(placed.baseMetres());
             if (height < 8) continue;
@@ -671,7 +675,7 @@ public final class Terrain {
             boolean collapsed = simCalderas && (v.caldera() || volcanoKinds && v.supervolcano()); // from format 22 the simulation built it, lake and all
             boolean caldera = calderas && !simCalderas && height >= CALDERA_MIN && !v.active()
                     && hash01(key) < (v.hotspot() ? (v.age() < CALDERA_AGE ? CALDERA_SHIELDS : 0) : CALDERA_SHARE);
-            float craterRadius = collapsed ? 0 : caldera ? CALDERA_RADIUS * radius : radius * (v.hotspot() ? 0.08f : 0.06f) + 5;
+            float craterRadius = collapsed || style == Volcano.TUYA ? 0 : caldera ? CALDERA_RADIUS * radius : radius * (v.hotspot() ? 0.08f : 0.06f) + 5; // a tuya's lava cap: no crater
             float craterDepth = caldera ? Math.min(CALDERA_DEPTH, 0.3f * height) : Math.min(25, 0.1f * height);
             // Cinder cones: young volcanoes scatter small steep cones of their own over their flanks.
             boolean young = v.hotspot() ? v.age() < CINDER_AGE : v.active();
@@ -693,7 +697,7 @@ public final class Terrain {
             }
             float rim = toY(placed.surfaceMetres(craterRadius)); // the lowest point of the rim holds the crater's pool
             for (int i = 0; variedVolcanoes && i < 16; i++)
-                rim = Math.min(rim, toY(placed.surfaceMetres(craterRadius * Math.cos(i * Math.PI / 8), craterRadius * Math.sin(i * Math.PI / 8), coneStyle)));
+                rim = Math.min(rim, toY(placed.surfaceMetres(craterRadius * Math.cos(i * Math.PI / 8), craterRadius * Math.sin(i * Math.PI / 8), style)));
             // From format 42 the cone at block scale stands only as high as erosion left it in the simulation: the ideal
             // peak laid over a summit the rivers wore down stood as a tower, its crater on top, beside the valleys.
             float baseY = toY(placed.baseMetres()), topY = toY(placed.surfaceMetres(0));
@@ -701,10 +705,10 @@ public final class Terrain {
             rim = baseY + kept * (rim - baseY);
             // Lava domes: an arc volcano's sticky lava piles up over the vent instead of flowing away (Mount St Helens).
             // From format 85 every erupting blown volcano grows one in its horseshoe (Mount St Helens since 1980).
-            float dome = volcanoKinds && !v.hotspot() && !collapsed && (hash01(key + 40) < DOME_SHARE || blownFlanks && v.blown() && v.active())
+            float dome = volcanoKinds && !v.hotspot() && !collapsed && style != Volcano.TUYA && (hash01(key + 40) < DOME_SHARE || blownFlanks && v.blown() && v.active())
                     ? craterRadius * DOME_RADIUS * (0.8f + 0.4f * hash01(key + 41)) : 0;
             Cone cone = new Cone(placed, cx, cz, radius, craterRadius, craterDepth, height, legacy, caldera, cinders, collapsed, softCeiling(rim),
-                    variedVolcanoes ? Volcano.LOBE_MAX : 1, baseY, kept, dome, softCeiling(rim) - craterDepth * (1 - DOME_RISE * (0.8f + 0.6f * hash01(key + 42))), new float[]{Float.NaN}, maarField);
+                    naturalCones ? Volcano.NATURAL_LOBE_MAX : variedVolcanoes ? Volcano.LOBE_MAX : 1, baseY, kept, dome, softCeiling(rim) - craterDepth * (1 - DOME_RISE * (0.8f + 0.6f * hash01(key + 42))), new float[]{Float.NaN}, maarField, style);
             // Listed over the whole footprint once lava flows and hot springs reach past the summit.
             int reach = (int) Math.ceil((landforms ? cone.radius * cone.lobes : cone.reach()) / BLOCKS_PER_CELL) + 1, cu = Math.round(v.u()), cv = Math.round(v.v());
             for (int dy = -reach; dy <= reach; dy++)
@@ -825,13 +829,32 @@ public final class Terrain {
         return blocks * (blocks >= 0 ? LAND_METRES_PER_BLOCK : SEA_METRES_PER_BLOCK);
     }
 
+    /**
+     * Format 97: how deep the gullies (barrancos) running down a cone's upper flanks cut here. Rain and meltwater on loose
+     * ash and lava rubble cut them close side by side straight down the slope (Mayon, Taranaki): none on the summit,
+     * deepest a quarter of the way down, fading out where the flanks spread. Each follows a ray from the summit,
+     * wandering a little; deeper on taller cones. Cut into the flank as it stands and into the ideal cone alike, then
+     * the higher of the two wins, so the gullies show wherever the summit is shaped per block.
+     */
+    private float coneGully(Cone c, double x, double z, double d) {
+        for (Cone o : conesNear(x, z)) // nor across a maar's tuff ring, whose lake its notch would drain (seed 777, x -9133 z 3914)
+            for (Maar m : o.maars) if (hyp(wrapBlocks(x - m.x), z - m.z) < (1 + MAAR_APRON) * m.r + 6) return 0;
+        double t = d / c.radius, a = Math.atan2(z - c.z, wrapBlocks(x - c.x)) + 0.25 * fine(x, z, 64, 109);
+        float n = noise(CONE_GULLY_RING * Math.cos(a), CONE_GULLY_RING * Math.sin(a), 8, 110), axis = Math.max(0, 1 - 4 * Math.abs(n)); // 1 on a gully's line
+        float own = noise(CONE_GULLY_RING * Math.cos(a), CONE_GULLY_RING * Math.sin(a), 16, 112); // each gully its own depth and length; some barely start
+        float deep = smoothstep((own + 0.5f) / 1.2f), end = 0.3f + 0.45f * deep;
+        // Not within two crater radii: a gully notching the rim would drain the crater's pool through it.
+        return CONE_GULLY * Math.min(1, c.height / 100) * deep * axis * axis * smoothstep((float) ((d - 2 * c.craterRadius) / (c.craterRadius + 8)))
+                * (1 - smoothstep((float) (t - end * 0.5f) / end));
+    }
+
     private float coneY(Cone c, double d) {
         return softCeiling(toY(c.v.surfaceMetres(d)));
     }
 
     /** The cone's surface at this column; from format 36 each volcano has its own shape, so the direction matters. */
     private float coneY(Cone c, double x, double z) {
-        return softCeiling(c.baseY + c.kept * (toY(c.v.surfaceMetres(wrapBlocks(x - c.x), z - c.z, coneStyle)) - c.baseY));
+        return softCeiling(c.baseY + c.kept * (toY(c.v.surfaceMetres(wrapBlocks(x - c.x), z - c.z, c.style)) - c.baseY));
     }
 
     /** Shortest east-west offset in blocks, across the seam if that is shorter. */
@@ -1540,9 +1563,14 @@ public final class Terrain {
         float open = 1 - (calderaWalls ? inside : 0);
         for (Cone c : simCalderas && !low ? conesNear(x, z) : List.<Cone>of()) {
             double d = hyp(wrapBlocks(x - c.x), z - c.z);
-            if (blownFlanks && !c.collapsed) natural += hummocks(c, x, z);
+            if (blownFlanks && !c.collapsed && c.style != Volcano.TUYA) natural += hummocks(c, x, z);
             if (c.collapsed || c.legacy || d >= c.reach()) continue;
             float s = coneY(c, x, z) + rough * (1 + 0.02f * c.height), fade = open * overLake * smoothstep((float) ((c.reach() - d) / (0.1 * c.radius)));
+            if (naturalCones) // from format 97 the summit's edge ragged and soft, not a circle
+                fade = open * overLake * smoothstep((float) ((c.reach() * (0.88 + 0.12 * fine(x, z, 64, 111)) - d) / (0.25 * c.radius)));
+            float gully = naturalCones && c.style == Volcano.NATURAL ? coneGully(c, x, z, d) : 0; // cut into the flank as it stands and the ideal cone alike
+            natural -= fade * gully;
+            s -= gully;
             if (s > natural) natural += fade * (s - natural);
             // From format 45 an erupting volcano's summit buries the range it grew on: its lava covers any ridge of
             // the massif round the crater, which stood over the rim and left the crater without a lava lake.
@@ -1632,6 +1660,10 @@ public final class Terrain {
         } finally {
             busy[0] = false;
         }
+        // From format 97 none reaching into a volcano's crater: a neighbour's maar fell on a summit, its rim read on the land
+        // without craters, and the crater's bowl then cut the ground out from under its lake (seed 777, x -9822 z 351).
+        for (Cone o : naturalCones ? conesNear(m.x, m.z) : List.<Cone>of())
+            if (o.craterRadius > 0 && hyp(wrapBlocks(o.x - m.x), o.z - m.z) < o.craterRadius + (1 + MAAR_APRON) * m.r) rim = BREACHED;
         return m.rim[0] = top - rim > MAAR_LEVEL * m.r ? BREACHED : rim;
     }
 
@@ -2645,6 +2677,10 @@ public final class Terrain {
         } finally {
             busy[0] = false;
         }
+        // From format 97 a creek anywhere across the crater breaches it too: the samples half-way in lie 13 blocks apart,
+        // and a creek slipping between them had its banks cut away by the bowl, its water left over dry ground (seed 777,
+        // x -9822 z 351: lobed summits gather more creeks).
+        if (naturalCones && riverAt(c.x, c.z, warpU(c.x, c.z), warpV(c.x, c.z)).edge < c.craterRadius + 2) rim = BREACHED;
         return c.edge[0] = rim;
     }
 

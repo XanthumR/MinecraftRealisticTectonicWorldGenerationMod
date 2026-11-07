@@ -220,14 +220,15 @@ public final class Hydrology {
                 continue;
             }
             int cu = (int) placed.u(), cv = (int) placed.v();
-            float radius = Volcano.LOBE_MAX * placed.radiusBlocks() / Terrain.BLOCKS_PER_CELL;
+            int style = placed.tuya(h) ? Volcano.TUYA : Volcano.NATURAL; // from format 97
+            float radius = Volcano.NATURAL_LOBE_MAX * placed.radiusBlocks() / Terrain.BLOCKS_PER_CELL;
             for (int dy = -(int) radius; dy <= radius; dy++)
                 for (int dx = -(int) radius; dx <= radius; dx++) {
                     double d = Math.hypot(dx, dy);
                     if (d >= radius || cv + dy < 0 || cv + dy >= h) continue;
                     int g = Math.floorMod(cu + dx, w) + (cv + dy) * w;
-                    float s = placed.surfaceMetres(dx * Terrain.BLOCKS_PER_CELL, dy * Terrain.BLOCKS_PER_CELL, Volcano.BLOWN);
-                    debris[g] = Math.max(debris[g], Volcano.DEBRIS_THICK * placed.riseMetres() * (float) placed.debris(dx * Terrain.BLOCKS_PER_CELL, dy * Terrain.BLOCKS_PER_CELL));
+                    float s = placed.surfaceMetres(dx * Terrain.BLOCKS_PER_CELL, dy * Terrain.BLOCKS_PER_CELL, style);
+                    if (style != Volcano.TUYA) debris[g] = Math.max(debris[g], Volcano.DEBRIS_THICK * placed.riseMetres() * (float) placed.debris(dx * Terrain.BLOCKS_PER_CELL, dy * Terrain.BLOCKS_PER_CELL));
                     if (s <= placed.baseMetres()) continue; // past this side's footprint
                     cones[g] = Float.isNaN(cones[g]) ? s : smoothMax(cones[g], s, CONE_BLEND);
                 }
