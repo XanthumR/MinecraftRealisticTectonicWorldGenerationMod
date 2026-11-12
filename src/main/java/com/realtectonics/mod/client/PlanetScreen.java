@@ -5,11 +5,13 @@ import com.realtectonics.mod.TectonicChunkGenerator;
 import com.realtectonics.sim.Drift;
 import com.realtectonics.sim.PlanetData;
 import com.realtectonics.sim.PlanetSettings;
+import com.realtectonics.sim.Relief;
 import com.realtectonics.sim.Terrain;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.gui.components.AbstractSliderButton;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.components.CycleButton;
+import net.minecraft.client.input.MouseButtonEvent;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.gui.screens.worldselection.CreateWorldScreen;
 import net.minecraft.core.registries.Registries;
@@ -42,7 +44,7 @@ public final class PlanetScreen extends Screen {
         return new PlanetScreen(parent, context.selectedDimensions().overworld() instanceof TectonicChunkGenerator g ? g.planet() : PlanetSettings.DEFAULT);
     }
 
-    private record Result(long seed, PlanetSettings settings, PlanetData data, int[] rgb, float landFraction, float peakMetres) {}
+    private record Result(long seed, PlanetSettings settings, PlanetData data, int[] rgb, float[] heights, float landFraction, float peakMetres) {}
 
     private final CreateWorldScreen parent;
     private final ExecutorService worker = Executors.newSingleThreadExecutor(r -> {
@@ -60,6 +62,10 @@ public final class PlanetScreen extends Screen {
     private volatile Result finished;
     private Result shown;
     private Identifier textureId;
+    // The 3D view (Relief): turned by dragging, moved by right-dragging, zoomed by scrolling; redrawn only when changed
+    private boolean three, turning, redraw;
+    private double yaw, pitch = Math.toRadians(50), radius, cu, cv; // radius: cells across half the map
+    private Identifier reliefId;
     private int restartIn = -1;
 
     private PlanetScreen(CreateWorldScreen parent, PlanetSettings settings) {
@@ -128,9 +134,11 @@ public final class PlanetScreen extends Screen {
             seed = WorldOptions.randomSeed();
             parent.getUiState().setSeed(Long.toString(seed));
             simulate();
-        }).bounds(cx - 155, y, 100, 20).build());
-        addRenderableWidget(Button.builder(Component.literal("Done"), b -> apply()).bounds(cx - 50, y, 100, 20).build());
-        addRenderableWidget(Button.builder(Component.literal("Cancel"), b -> onClose()).bounds(cx + 55, y, 100, 20).build());
+        }).bounds(cx - 155, y, 75, 20).build());
+        addRenderableWidget(CycleButton.<Boolean>builder(on -> Component.literal(on ? "3D" : "Flat"), three).withValues(false, true)
+                .create(cx - 77, y, 75, 20, Component.literal("Map"), (button, on) -> { three = on; redraw = true; }));
+        addRenderableWidget(Button.builder(Component.literal("Done"), b -> apply()).bounds(cx + 1, y, 75, 20).build());
+        addRenderableWidget(Button.builder(Component.literal("Cancel"), b -> onClose()).bounds(cx + 79, y, 75, 20).build());
     }
 
     private int mapWidth() {
@@ -164,7 +172,7 @@ public final class PlanetScreen extends Screen {
                 rgb[Math.floorMod(spawn % d.w + k, d.w) + spawn / d.w * d.w] = 0xFF0000;
                 rgb[spawn % d.w + Math.clamp(spawn / d.w + k, 0, d.h - 1) * d.w] = 0xFF0000;
             }
-            finished = new Result(s, ps, d, rgb, land / (float) rgb.length, peak);
+            finished = new Result(s, ps, d, rgb, Relief.heights(d, ps.mountainScale(), terrain.blocksPerCell), land / (float) rgb.length, peak);
         });
     }
 
@@ -185,7 +193,13 @@ public final class PlanetScreen extends Screen {
 
     private void show(Result r) {
         textureId = MapScreen.upload("planet_preview", r.rgb, r.data.w, r.data.h, textureId);
+        if (shown == null || shown.data.w != r.data.w) { // a new size: the whole planet again
+            radius = r.data.w / 2.0;
+            cu = r.data.w / 2.0;
+            cv = r.data.h / 2.0;
+        }
         shown = r;
+        redraw = true;
         drawn = null;
     }
 
@@ -195,12 +209,55 @@ public final class PlanetScreen extends Screen {
         g.centeredText(font, title, width / 2, 8, 0xFFFFFFFF);
         int mapW = mapWidth(), mapH = mapW / 2, x = (width - mapW) / 2, y = 24;
         if (stale(shown) && drawn != null) g.blit(RenderPipelines.GUI_TEXTURED, textureId, x, y, 0, 0, mapW, mapH, driftW, driftH, driftW, driftH);
+        else if (shown != null && three) {
+            int pw = (int) (mapW * minecraft.getWindow().getGuiScale()), ph = pw / 2; // drawn at the screen's own pixels
+            if (redraw || reliefId == null) {
+                reliefId = MapScreen.upload("planet_relief", Relief.render(shown.rgb, shown.heights, shown.data.w, shown.data.h, cu, cv, yaw, pitch, radius, pw, ph), pw, ph, reliefId);
+                redraw = false;
+            }
+            g.blit(RenderPipelines.GUI_TEXTURED, reliefId, x, y, 0, 0, mapW, mapH, pw, ph, pw, ph);
+        }
         else if (shown != null) g.blit(RenderPipelines.GUI_TEXTURED, textureId, x, y, 0, 0, mapW, mapH, shown.data.w, shown.data.h, shown.data.w, shown.data.h);
         else g.fill(x, y, x + mapW, y + mapH, 0xFF101820);
         String status = stale(shown) ? String.format(progress < PlanetData.PLATES_SHARE ? "Plates drifting... %d%%" : "Rivers, climate and biomes... %d%%", (int) (progress * 100))
+                : three ? "Drag: turn  |  right-drag: move  |  scroll: zoom  |  heights as the game builds them"
                 : String.format("Seed %d  |  %d%% land  |  highest peak %.1f km, y %d  |  + spawn", seed, Math.round(shown.landFraction * 100),
                 shown.peakMetres / 1000, Terrain.peakY(shown.peakMetres, settings.mountainScale()));
         g.centeredText(font, status, width / 2, y + mapH - 12, 0xFFFFFFFF);
+    }
+
+    private boolean onMap(double mx, double my) {
+        int mapW = mapWidth(), x = (width - mapW) / 2;
+        return three && shown != null && mx >= x && mx < x + mapW && my >= 24 && my < 24 + mapW / 2;
+    }
+
+    @Override
+    public boolean mouseClicked(MouseButtonEvent click, boolean doubleClick) {
+        turning = onMap(click.x(), click.y());
+        return turning || super.mouseClicked(click, doubleClick);
+    }
+
+    @Override
+    public boolean mouseDragged(MouseButtonEvent click, double dragX, double dragY) {
+        if (!turning) return super.mouseDragged(click, dragX, dragY);
+        if (click.button() == 0) {
+            yaw += dragX * 0.01;
+            pitch = Math.clamp(pitch - dragY * 0.01, 0.2, Math.PI / 2);
+        } else { // the land follows the mouse
+            double s = mapWidth() / (2 * radius), da = -dragX / s, db = dragY / (s * Math.sin(pitch));
+            cu += da * Math.cos(yaw) + db * Math.sin(yaw);
+            cv = Math.clamp(cv + da * Math.sin(yaw) - db * Math.cos(yaw), 0, shown.data.h);
+        }
+        redraw = true;
+        return true;
+    }
+
+    @Override
+    public boolean mouseScrolled(double mouseX, double mouseY, double scrollX, double scrollY) {
+        if (!onMap(mouseX, mouseY)) return super.mouseScrolled(mouseX, mouseY, scrollX, scrollY);
+        radius = Math.clamp(radius * (scrollY > 0 ? 0.7 : 1 / 0.7), 24, shown.data.w / 2.0);
+        redraw = true;
+        return true;
     }
 
     private void apply() {
@@ -220,6 +277,7 @@ public final class PlanetScreen extends Screen {
     public void removed() {
         worker.shutdownNow();
         if (textureId != null) minecraft.getTextureManager().release(textureId);
+        if (reliefId != null) minecraft.getTextureManager().release(reliefId);
     }
 
     private final class Slider extends AbstractSliderButton {

@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+- **Caves stay deep under rivers, lakes, lava and ice**, and beside them: no more rivers floating over a cavern.
+- **Cave entrances only on steep ground** (hillsides, cliffs, mountains); on flat land caves keep a roof of the
+  land's own ground, not bare stone.
+- **3D map** on the planet screen: turn, move and zoom the planet in the game's own proportions.
+- William Wythers' Overhauled Overworld works alongside: its ground disks and extra ores are left out, our terrain
+  already lays slopes, scree and snow.
+
 ## 0.1.2 (2026-11-07)
 
 Worlds made with 0.1.1 keep their look: every terrain change below only applies to worlds created with this version,

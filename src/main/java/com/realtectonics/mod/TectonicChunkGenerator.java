@@ -38,8 +38,14 @@ import net.minecraft.world.level.levelgen.NoiseGeneratorSettings;
 import net.minecraft.world.level.levelgen.RandomState;
 import net.minecraft.world.level.levelgen.blending.Blender;
 
+import net.minecraft.world.level.biome.BiomeGenerationSettings;
+import net.minecraft.world.level.levelgen.feature.Feature;
+import net.minecraft.world.level.levelgen.placement.PlacedFeature;
+
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Builds terrain columns straight from the simulated planet. A vanilla noise generator inside it only carves
@@ -173,10 +179,37 @@ public final class TectonicChunkGenerator extends ChunkGenerator {
     private volatile RandomState cavesFor;
 
     public TectonicChunkGenerator(BiomeSource biomes, Holder<NoiseGeneratorSettings> settings, PlanetSettings planet) {
-        super(biomes);
+        super(biomes, TectonicChunkGenerator::decoration);
         this.planet = planet;
         this.settings = settings;
         this.vanilla = new NoiseBasedChunkGenerator(biomes, settings);
+    }
+
+    /**
+     * Each biome's features without William Wythers' Overhauled Overworld's ground disks and extra ores: 30-256 disks a
+     * chunk, each testing ~2,000 blocks and their neighbours to find slopes to paint stone, scree or snow on (half the
+     * generation time on our land), and 50-100 ore veins a chunk in windswept and volcanic country. Our columns already
+     * lay rock on steep slopes, scree and snow from the planet, and our deposits put the ores where the geology did;
+     * WWOO's trees, plants and rocks stay. Only the per-chunk lookup changes: the step indices, so other features' seeds, stay.
+     */
+    private static BiomeGenerationSettings decoration(Holder<net.minecraft.world.level.biome.Biome> biome) {
+        return DECORATION.computeIfAbsent(biome, b -> {
+            BiomeGenerationSettings s = b.value().getGenerationSettings();
+            BiomeGenerationSettings.PlainBuilder out = new BiomeGenerationSettings.PlainBuilder();
+            s.getCarvers().forEach(out::addCarver);
+            List<net.minecraft.core.HolderSet<PlacedFeature>> steps = s.features();
+            for (int step = 0; step < steps.size(); step++)
+                for (Holder<PlacedFeature> f : steps.get(step)) if (!groundDisk(f)) out.addFeature(step, f);
+            return out.build();
+        });
+    }
+
+    private static final Map<Holder<net.minecraft.world.level.biome.Biome>, BiomeGenerationSettings> DECORATION = new ConcurrentHashMap<>();
+
+    private static boolean groundDisk(Holder<PlacedFeature> f) {
+        Feature<?> type = f.value().feature().value().feature();
+        return (type == Feature.DISK || type == Feature.ORE || type == Feature.SCATTERED_ORE)
+                && f.unwrapKey().map(k -> k.identifier().getNamespace().equals("wythers")).orElse(false);
     }
 
     public PlanetSettings planet() {
@@ -239,6 +272,7 @@ public final class TectonicChunkGenerator extends ChunkGenerator {
             for (Terrain.Column c : cols) highest = Math.max(highest, c.ground());
             caveField = caves(random).new Field(x0, z0, minY, highest);
         }
+        int[] ceilings = RealTectonics.terrain().deepCaves ? caveCeilings(x0, z0, cols) : null;
         for (int lz = 0; lz < 16; lz++)
             for (int lx = 0; lx < 16; lx++) {
                 int i = lx + 1 + (lz + 1) * 18;
@@ -285,6 +319,7 @@ public final class TectonicChunkGenerator extends ChunkGenerator {
                 for (int n : new int[]{i - 1, i + 1, i - 18, i + 18})
                     held |= cols[n].water() >= cols[n].ground() || cols[n].lava() != Terrain.Column.NO_WATER || cols[n].ice() != Terrain.Column.NO_WATER;
                 int caveTop = caveField == null ? Integer.MIN_VALUE : c.ground() - (held ? Caves.ROOF : 0), solidTop = minY;
+                if (ceilings != null) caveTop = Math.min(caveTop, ceilings[lx + lz * 16]);
                 // From format 72 no pillars where the cave is open straight up to the sky: vanilla's stand in closed caverns,
                 // but where an entrance opened a cavern from above they rose from the pit, cut off flat where the entrance
                 // layer began (the user: "there is this kind of pillars in caves"). Pillars under the pit's rim stay.
@@ -423,8 +458,34 @@ public final class TectonicChunkGenerator extends ChunkGenerator {
 
     @Override
     public void applyCarvers(WorldGenRegion region, long seed, RandomState random, BiomeManager biomes, StructureManager structures, ChunkAccess chunk) {
+        Terrain.Column[] cols = columns(chunk, structures);
+        int[] ceilings = RealTectonics.terrain().deepCaves ? caveCeilings(chunk.getPos().getMinBlockX(), chunk.getPos().getMinBlockZ(), cols) : null;
+        BlockState[][] roofs = ceilings == null ? null : roofs(chunk, cols, ceilings);
         vanilla.applyCarvers(region, seed, random, biomes, structures, chunk);
-        sealCavesFromWater(chunk, structures);
+        sealCavesFromWater(chunk, cols, ceilings, roofs);
+    }
+
+    /**
+     * Format 98: each column's blocks from just over its cave ceiling to one over its ground (a snow layer), as filled
+     * before the carvers cut their tunnels: put back where a tunnel cut them, a roofed cave keeps the grass, soil, sand
+     * and snow of the land round it, not a patch of bare stone.
+     */
+    private static BlockState[][] roofs(ChunkAccess chunk, Terrain.Column[] cols, int[] ceilings) {
+        int x0 = chunk.getPos().getMinBlockX(), z0 = chunk.getPos().getMinBlockZ();
+        BlockPos.MutableBlockPos pos = new BlockPos.MutableBlockPos();
+        BlockState[][] out = new BlockState[256][];
+        for (int lz = 0; lz < 16; lz++)
+            for (int lx = 0; lx < 16; lx++) {
+                int i = lx + lz * 16, lo = roofBottom(chunk, ceilings[i]), hi = Math.min(cols[lx + 1 + (lz + 1) * 18].ground() + 1, chunk.getMaxY());
+                BlockState[] band = new BlockState[Math.max(0, hi - lo + 1)];
+                for (int y = lo; y <= hi; y++) band[y - lo] = chunk.getBlockState(pos.set(x0 + lx, y, z0 + lz));
+                out[i] = band;
+            }
+        return out;
+    }
+
+    private static int roofBottom(ChunkAccess chunk, int ceiling) {
+        return Math.max(ceiling + 1, chunk.getMinY() + 1);
     }
 
     @Override
@@ -437,8 +498,7 @@ public final class TectonicChunkGenerator extends ChunkGenerator {
      * leave air tunnels through seas, lakes and rivers. Undo that: water goes back above the bed, rock below it
      * and beside it. Crater lava lakes get the same treatment.
      */
-    private static void sealCavesFromWater(ChunkAccess chunk, StructureManager structures) {
-        Terrain.Column[] cols = columns(chunk, structures);
+    private static void sealCavesFromWater(ChunkAccess chunk, Terrain.Column[] cols, int[] ceilings, BlockState[][] roofs) {
         int x0 = chunk.getPos().getMinBlockX(), z0 = chunk.getPos().getMinBlockZ();
         BlockPos.MutableBlockPos pos = new BlockPos.MutableBlockPos();
         for (int lz = 0; lz < 16; lz++)
@@ -452,12 +512,74 @@ public final class TectonicChunkGenerator extends ChunkGenerator {
                 // lowest ground here or beside up. Caves deeper down stay, closed off and dry, instead of being filled.
                 int bottom = RealTectonics.terrain().fastMath ? Math.max(chunk.getMinY() + 1, Math.min(Math.min(c.ground(),
                         Math.min(cols[i - 1].ground(), cols[i + 1].ground())), Math.min(cols[i - 18].ground(), cols[i + 18].ground()))) : chunk.getMinY() + 1;
+                if (ceilings != null) { // format 98: the carvers' tunnels kept as deep as the noise caves, filled back as they were
+                    BlockState[] band = roofs[lx + lz * 16];
+                    for (int k = 0, lo = roofBottom(chunk, ceilings[lx + lz * 16]); k < band.length; k++)
+                        if (!band[k].isAir() && chunk.getBlockState(pos.set(x0 + lx, lo + k, z0 + lz)).isAir()) chunk.setBlockState(pos, band[k]);
+                }
                 for (int y = bottom; y <= top; y++)
                     if (chunk.getBlockState(pos.set(x0 + lx, y, z0 + lz)).isAir())
                         chunk.setBlockState(pos, y <= c.ground() ? rock(c, y)
                                 : c.lava() != Terrain.Column.NO_WATER ? LAVA
                                 : frozen(RealTectonics.terrain(), c, x0 + lx, z0 + lz) && y == c.water() ? ICE : WATER);
             }
+    }
+
+    static final int WATER_ROOF = 16;   // format 98: blocks of rock kept between a cave and the bed of water, lava or ice over it
+    static final int WATER_REACH = 12;  // blocks sideways from that bed over which the roof thins a block per block to Caves.ROOF, so no cave runs under a river's bank
+    static final int MOUTH_REACH = 8;   // blocks round a column within which its relief is measured
+    static final int MOUTH_RELIEF = 8;  // blocks of relief within MOUTH_REACH below which a cave stays roofed: mouths only in hillsides, cliffs and mountains
+    /**
+     * Format 98: per column of the chunk (lx + lz * 16), the highest y a cave may reach. Under water, lava and ice and
+     * up to WATER_REACH blocks beside it the rock over a cave thickens to WATER_ROOF, where a cavern 5 blocks under a
+     * riverbed left the river floating over it (a player's report). On gentle land caves keep a roof: vanilla's
+     * entrances opened all over our wide flat lowlands, where real caves open in valley walls, cliffs and mountains.
+     */
+    private static int[] caveCeilings(int x0, int z0, Terrain.Column[] cols) {
+        int r = WATER_REACH, w = 16 + 2 * r, m = MOUTH_REACH, rows = 16 + 2 * m;
+        Terrain.Column[] near = RealTectonics.terrain().relaxedColumns(x0 - r, z0 - r, w, w);
+        // Relief: the highest and lowest dry ground in the square of MOUTH_REACH round each column, rows first, then columns.
+        int[] rowLo = new int[rows * 16], rowHi = new int[rows * 16];
+        for (int z = 0; z < rows; z++)
+            for (int lx = 0; lx < 16; lx++) {
+                int lo = Integer.MAX_VALUE, hi = Integer.MIN_VALUE;
+                for (int dx = -m; dx <= m; dx++) {
+                    Terrain.Column n = near[lx + r + dx + (z + r - m) * w];
+                    if (n.water() >= n.ground()) continue; // banks of a river or lake are not cliffs
+                    lo = Math.min(lo, n.ground());
+                    hi = Math.max(hi, n.ground());
+                }
+                rowLo[lx + z * 16] = lo;
+                rowHi[lx + z * 16] = hi;
+            }
+        // Under water, lava and ice: its bed less WATER_ROOF, rising a block per block away from it (rows, then columns:
+        // a diamond, not a circle; ponytail: exact enough for a roof, and as cheap by the sea as inland).
+        int[] rowRoof = new int[w * 16];
+        for (int z = 0; z < w; z++)
+            for (int lx = 0; lx < 16; lx++) {
+                int roof = Integer.MAX_VALUE;
+                for (int dx = -r; dx <= r; dx++) {
+                    Terrain.Column n = near[lx + r + dx + z * w];
+                    if (n.water() >= n.ground() || n.lava() != Terrain.Column.NO_WATER || n.ice() != Terrain.Column.NO_WATER)
+                        roof = Math.min(roof, n.ground() - WATER_ROOF + Math.abs(dx) * (WATER_ROOF - Caves.ROOF) / r);
+                }
+                rowRoof[lx + z * 16] = roof;
+            }
+        int[] out = new int[256];
+        for (int lz = 0; lz < 16; lz++)
+            for (int lx = 0; lx < 16; lx++) {
+                int ground = cols[lx + 1 + (lz + 1) * 18].ground(), ceiling = ground, lo = ground, hi = ground;
+                for (int dz = 0; dz <= 2 * m; dz++) {
+                    lo = Math.min(lo, rowLo[lx + (lz + dz) * 16]);
+                    hi = Math.max(hi, rowHi[lx + (lz + dz) * 16]);
+                }
+                for (int dz = -r; dz <= r; dz++) {
+                    int roof = rowRoof[lx + (lz + r + dz) * 16];
+                    if (roof != Integer.MAX_VALUE) ceiling = Math.min(ceiling, roof + Math.abs(dz) * (WATER_ROOF - Caves.ROOF) / r);
+                }
+                out[lx + lz * 16] = hi - lo < MOUTH_RELIEF ? Math.min(ceiling, ground - Caves.ROOF) : ceiling;
+            }
+        return out;
     }
 
     /** Layered bedrock geology: each layer is one rock type everywhere, shifted up and down by the column's fold. */
