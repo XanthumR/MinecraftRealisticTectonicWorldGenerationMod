@@ -347,6 +347,7 @@ public final class Terrain {
     private final boolean oases;          // spring-fed pools in a green ring where groundwater rises in desert (oasisField): format 95
     private final boolean variedCenotes;  // cenotes as jugs, cylinders, aguadas and half-fallen caves, deeper inland, one level each (karst()): format 96
     private final boolean naturalCones;   // volcanoes with small bulges, stretched along their vents, gullied upper flanks, a ragged summit edge; tuyas: format 97
+    public final boolean deepCaves;       // caves stay deep under water and beside it, and open to the sky only on steep ground (mod): format 98
     private final float[] placer;         // format 92: per cell, share of a river bed's blocks that are gold washed from a deposit upstream
     private volatile byte[] depositCells; // format 92: per cell, the Deposits.Kind ordinal it holds or -1, for the map and /tectonic (lazy)
     private final java.util.concurrent.ConcurrentHashMap<Integer, Travertine> springSites = new java.util.concurrent.ConcurrentHashMap<>(); // format 91: each site square's terraces, or NO_TRAVERTINE
@@ -510,6 +511,7 @@ public final class Terrain {
         oases = data.format >= 95;
         variedCenotes = data.format >= 96;
         naturalCones = data.format >= 97;
+        deepCaves = data.format >= 98;
         coneStyle = blownFlanks ? Volcano.BLOWN : smoothCones ? Volcano.SMOOTH_SCARS : variedVolcanoes ? Volcano.VARIED : Volcano.ROUND;
         snowLine = data.format >= 18;
         iceCapBelow = data.format >= 8 ? Biome.ICE_CAP_BELOW : Biome.OLD_ICE_CAP_BELOW;
