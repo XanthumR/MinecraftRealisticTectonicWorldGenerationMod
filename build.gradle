@@ -4,7 +4,7 @@ plugins {
 }
 
 group = 'com.realtectonics'
-version = '0.1.2'
+version = '0.1.3'
 base { archivesName = 'realtectonics-neoforge-1.21.1' } // jar: realtectonics-neoforge-1.21.1-<version>.jar
 
 repositories {
@@ -24,6 +24,8 @@ dependencies {
     runtimeOnly 'maven.modrinth:glitchcore:S2TfWrZR'
     runtimeOnly 'maven.modrinth:wwoo:sU7oaRZv' // 2.6.7: William Wythers' vanilla biome overhaul; its trees and plants show, its terrain noise and sub-biomes don't (our generator and biome table)
     runtimeOnly 'maven.modrinth:cristel-lib:Sduz0AWP' // 3.1.7, WWOO's library
+    runtimeOnly 'maven.modrinth:vanillabackport:mGS7BxD4' // 1.2.2: newer Minecraft's content on 1.21.1; its pale garden comes through TectonicBiomeSource (format 99)
+    runtimeOnly 'maven.modrinth:platform:rh4p4ixM' // 1.4.2, Vanilla Backport's library
     testImplementation platform('org.junit:junit-bom:5.11.4')
     testImplementation 'org.junit.jupiter:junit-jupiter'
     testRuntimeOnly 'org.junit.platform:junit-platform-launcher'

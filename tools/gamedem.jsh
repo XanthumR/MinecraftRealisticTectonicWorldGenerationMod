@@ -6,6 +6,7 @@ import com.realtectonics.sim.*;
 // height instead of the highest. -Dplanet (default: generate -Dseed 777).
 var path = System.getProperty("planet"); long seed = Long.getLong("seed", 777);
 var d = path == null ? PlanetData.generate(seed, PlanetSettings.DEFAULT, x -> {}) : PlanetData.load(java.nio.file.Path.of(path));
+d.format = Integer.getInteger("fmt", d.format); // -Dfmt: build the terrain as that format
 var t = new Terrain(d, seed, Float.parseFloat(System.getProperty("ms", "1")), Integer.getInteger("zoom", 1), Float.parseFloat(System.getProperty("rw", "2")));
 double target = Double.parseDouble(System.getProperty("target", "0")); int bw = Integer.getInteger("bw", 10), bh = Integer.getInteger("bh", 6), k = Integer.getInteger("k", 4), W = d.w, H = d.h;
 double kmPerBlock = 40030.0 / (W * Terrain.BLOCKS_PER_CELL * Integer.getInteger("zoom", 1));
@@ -20,7 +21,11 @@ for (int i = 0; i < k; i++) {
   int[] o = t.blockOf(bx + by * W); int n = bw * Terrain.BLOCKS_PER_CELL, m = bh * Terrain.BLOCKS_PER_CELL;
   var buf = java.nio.ByteBuffer.allocate(n * m * 4).order(java.nio.ByteOrder.LITTLE_ENDIAN);
   float[] row = new float[n * m];
-  java.util.stream.IntStream.range(0, m).parallel().forEach(z -> { for (int x = 0; x < n; x++) { var c = t.relaxedColumn(o[0] + x, o[1] + z); row[x + z * n] = t.toMetres(c.ground()); } });
+  // plain threads, not a parallel stream: a common-pool worker computing a relax tile (itself parallel) can steal a row
+  // that waits on that same tile, and everything stops
+  var pool = java.util.concurrent.Executors.newFixedThreadPool(Runtime.getRuntime().availableProcessors());
+  for (int zz = 0; zz < m; zz++) { int z = zz; pool.submit(() -> { for (int x = 0; x < n; x++) { var c = t.relaxedColumn(o[0] + x, o[1] + z); row[x + z * n] = t.toMetres(c.ground()); } }); }
+  pool.shutdown(); pool.awaitTermination(1, java.util.concurrent.TimeUnit.HOURS);
   for (float f : row) buf.putFloat(f);
   java.nio.file.Files.write(java.nio.file.Path.of("out/dem/game_" + i + ".f32"), buf.array());
   meta.append("game_" + i + " " + n + " " + m + " " + kmPerBlock + " at " + o[0] + "," + o[1] + "\n");

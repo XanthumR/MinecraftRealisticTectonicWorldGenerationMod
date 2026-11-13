@@ -68,6 +68,9 @@ the game for up to ~35 ms at a time: microstutters. ZGC keeps its pauses under a
 - **[Distant Horizons](https://modrinth.com/mod/distanthorizons)**: see whole mountain ranges on the horizon.
 - **[Biomes O' Plenty](https://modrinth.com/mod/biomes-o-plenty)**: picked up automatically for new worlds.
 - **[C2ME](https://modrinth.com/mod/c2me-neoforge)**: about twice the chunk generation speed on a server.
+- **[Vanilla Backport](https://modrinth.com/mod/vanillabackport)** (NeoForge 1.21.1): pale gardens, dappled forest and sulfur caves in new worlds.
+- **[Immersive Portals](https://modrinth.com/mod/immersiveportals)**: the world wraps east-west seamlessly; walk off one edge, come in at the other.
+- **[William Wythers' Overhauled Overworld](https://modrinth.com/datapack/wwoo)**: its trees and plants grow in our terrain.
 
 ## Building
 

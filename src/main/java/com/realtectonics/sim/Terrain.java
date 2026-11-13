@@ -60,6 +60,11 @@ public final class Terrain {
     static final int GULLY_SMOOTH = 2;                // format 41: blocks either side the heights are averaged over (twice) before water is routed
     static final int GULLY_LOCAL = 4;                 // format 41: blocks around over which the surroundings' cut is averaged
     static final float GULLY_RELIEF = 4;              // format 41: blocks cut per block of stream power above the surroundings'
+    static final int VALLEY_STEP = 4;                 // format 100: unzoomed blocks between the points valleys are eroded on (8 read as one smooth dome, 2 as spiky scree, and 71 s)
+    static final int VALLEY_WIDEST = 1024;            // format 100: cells round the widest planet that gets valleys (Medium). Large and Huge keep the massifs: a 4-block grid there
+                                                      // costs 4-16 times Medium's ~6 s and 330 MB, and a coarser one reads as smooth swells (Huge on 16 blocks: no better than the massifs)
+    static final float VALLEY_ROUGH = 4;              // format 100: blocks of unevenness the water's routing sees (not the land's): drainage wanders
+    static final float VALLEY_HIGH = 20;              // format 100: blocks of that height before the land counts as high (the massifs' own start)
     static final float BEACH_SLOPE = 60;              // blocks the beach rises per unit of land mask; from format 37 divided by the beach's width factor
     static final float RIPARIAN_MM = 700, RIPARIAN_FLOW = 2000, RIPARIAN_REACH = 48; // format 38: rain-equivalent a big river's groundwater gives its banks; flow that counts as big; blocks its green strip reaches
     static final float FROZEN_MOST = 0.5f; // format 45: cos(60°), the shift that makes a 0 °C test mean frozen two-thirds of the year
@@ -348,6 +353,9 @@ public final class Terrain {
     private final boolean variedCenotes;  // cenotes as jugs, cylinders, aguadas and half-fallen caves, deeper inland, one level each (karst()): format 96
     private final boolean naturalCones;   // volcanoes with small bulges, stretched along their vents, gullied upper flanks, a ragged summit edge; tuyas: format 97
     public final boolean deepCaves;       // caves stay deep under water and beside it, and open to the sky only on steep ground (mod): format 98
+    public final boolean newBiomes;       // newer Minecraft's biomes where the game has them: pale garden, dappled forest, sulfur caves in volcanic arcs (mod): format 99
+    private final boolean valleys;        // high land eroded again on points a quarter cell apart: valleys branching like a tree (Valleys): format 100
+    private final Valleys valleyGrid;     // format 100: the massifs as the water cut them; null before
     private final float[] placer;         // format 92: per cell, share of a river bed's blocks that are gold washed from a deposit upstream
     private volatile byte[] depositCells; // format 92: per cell, the Deposits.Kind ordinal it holds or -1, for the map and /tectonic (lazy)
     private final java.util.concurrent.ConcurrentHashMap<Integer, Travertine> springSites = new java.util.concurrent.ConcurrentHashMap<>(); // format 91: each site square's terraces, or NO_TRAVERTINE
@@ -512,6 +520,8 @@ public final class Terrain {
         variedCenotes = data.format >= 96;
         naturalCones = data.format >= 97;
         deepCaves = data.format >= 98;
+        newBiomes = data.format >= 99;
+        valleys = data.format >= 100 && data.w <= VALLEY_WIDEST;
         coneStyle = blownFlanks ? Volcano.BLOWN : smoothCones ? Volcano.SMOOTH_SCARS : variedVolcanoes ? Volcano.VARIED : Volcano.ROUND;
         snowLine = data.format >= 18;
         iceCapBelow = data.format >= 8 ? Biome.ICE_CAP_BELOW : Biome.OLD_ICE_CAP_BELOW;
@@ -663,60 +673,7 @@ public final class Terrain {
             }
             System.arraycopy(next, 0, iceTop, 0, next.length);
         }
-        for (Volcano v : data.volcanoes) {
-            if (v.gone()) continue;
-            boolean legacy = Float.isNaN(v.baseMetres());
-            int style = naturalCones ? v.tuya(h) ? Volcano.TUYA : Volcano.NATURAL : coneStyle;
-            Volcano placed = legacy ? v.withBase(toMetres(cubic(groundY, v.u(), v.v()))) : v;
-            float radius = placed.radiusBlocks(), height = toY(placed.surfaceMetres(0)) - toY(placed.baseMetres());
-            if (height < 8) continue;
-            double cx = wrapBlocks((v.u() - originX) * BLOCKS_PER_CELL), cz = (v.v() - originY) * BLOCKS_PER_CELL;
-            int key = Math.round(v.u() * 7919) ^ Math.round(v.v() * 104729);
-            // Calderas: an old volcano's summit, emptied by its last great eruption, falls in: a wide flat-floored basin
-            // under steep walls, filled by a lake (Crater Lake). Extinct arc volcanoes and middle-aged shields.
-            boolean collapsed = simCalderas && (v.caldera() || volcanoKinds && v.supervolcano()); // from format 22 the simulation built it, lake and all
-            boolean caldera = calderas && !simCalderas && height >= CALDERA_MIN && !v.active()
-                    && hash01(key) < (v.hotspot() ? (v.age() < CALDERA_AGE ? CALDERA_SHIELDS : 0) : CALDERA_SHARE);
-            float craterRadius = collapsed || style == Volcano.TUYA ? 0 : caldera ? CALDERA_RADIUS * radius : radius * (v.hotspot() ? 0.08f : 0.06f) + 5; // a tuya's lava cap: no crater
-            float craterDepth = caldera ? Math.min(CALDERA_DEPTH, 0.3f * height) : Math.min(25, 0.1f * height);
-            // Cinder cones: young volcanoes scatter small steep cones of their own over their flanks.
-            boolean young = v.hotspot() ? v.age() < CINDER_AGE : v.active();
-            float[][] cinders = new float[calderas && young ? 2 + (int) (4 * hash01(key + 1)) : 0][];
-            for (int i = 0; i < cinders.length; i++) {
-                double a = 2 * Math.PI * hash01(key + 10 + i), d = radius * (0.3 + 0.5 * hash01(key + 20 + i));
-                float r = CINDER_RADIUS * (0.6f + 0.8f * hash01(key + 30 + i));
-                cinders[i] = new float[]{(float) (cx + d * Math.cos(a)), (float) (cz + d * Math.sin(a)), r, CINDER_STEEP * r};
-            }
-            // From format 88 maars: where the ground is wet, magma rising beside the volcano meets groundwater and blows
-            // out craters below the land, ringed by low tuff (the Eifel, Ubehebe); a lake fills them in wet country.
-            float wet = bilinear(data.precipitation, v.u(), v.v());
-            Maar[] maarField = new Maar[maars && young && wet > MAAR_RAIN ? 1 + (int) (3 * hash01(key + 50)) : 0];
-            for (int i = 0; i < maarField.length; i++) {
-                float r = MAAR_RADIUS * (0.7f + 0.6f * hash01(key + 60 + i));
-                // Spread round the volcano: two overlapping, one's pit dug beside the other's lake (x -15551 z 6184).
-                double a = 2 * Math.PI * (hash01(key + 70) + (i + 0.3 * hash01(key + 71 + i)) / maarField.length), d = Math.max(0, radius - (2 + MAAR_APRON) * r) * (0.8 + 0.2 * hash01(key + 80 + i)); // low on the flank, where it levels out
-                maarField[i] = new Maar(cx + d * Math.cos(a), cz + d * Math.sin(a), r, wet > MAAR_LAKE_RAIN, new float[]{Float.NaN});
-            }
-            float rim = toY(placed.surfaceMetres(craterRadius)); // the lowest point of the rim holds the crater's pool
-            for (int i = 0; variedVolcanoes && i < 16; i++)
-                rim = Math.min(rim, toY(placed.surfaceMetres(craterRadius * Math.cos(i * Math.PI / 8), craterRadius * Math.sin(i * Math.PI / 8), style)));
-            // From format 42 the cone at block scale stands only as high as erosion left it in the simulation: the ideal
-            // peak laid over a summit the rivers wore down stood as a tower, its crater on top, beside the valleys.
-            float baseY = toY(placed.baseMetres()), topY = toY(placed.surfaceMetres(0));
-            float kept = smoothCones && !legacy ? Math.clamp((groundY[cell(Math.round(v.u()), Math.round(v.v()))] - baseY) / Math.max(1, topY - baseY), 0, 1) : 1;
-            rim = baseY + kept * (rim - baseY);
-            // Lava domes: an arc volcano's sticky lava piles up over the vent instead of flowing away (Mount St Helens).
-            // From format 85 every erupting blown volcano grows one in its horseshoe (Mount St Helens since 1980).
-            float dome = volcanoKinds && !v.hotspot() && !collapsed && style != Volcano.TUYA && (hash01(key + 40) < DOME_SHARE || blownFlanks && v.blown() && v.active())
-                    ? craterRadius * DOME_RADIUS * (0.8f + 0.4f * hash01(key + 41)) : 0;
-            Cone cone = new Cone(placed, cx, cz, radius, craterRadius, craterDepth, height, legacy, caldera, cinders, collapsed, softCeiling(rim),
-                    naturalCones ? Volcano.NATURAL_LOBE_MAX : variedVolcanoes ? Volcano.LOBE_MAX : 1, baseY, kept, dome, softCeiling(rim) - craterDepth * (1 - DOME_RISE * (0.8f + 0.6f * hash01(key + 42))), new float[]{Float.NaN}, maarField, style);
-            // Listed over the whole footprint once lava flows and hot springs reach past the summit.
-            int reach = (int) Math.ceil((landforms ? cone.radius * cone.lobes : cone.reach()) / BLOCKS_PER_CELL) + 1, cu = Math.round(v.u()), cv = Math.round(v.v());
-            for (int dy = -reach; dy <= reach; dy++)
-                for (int dx = -reach; dx <= reach; dx++)
-                    conesByCell.add(cell(cu + dx, cv + dy), cone);
-        }
+        cones();
         // From format 92 rivers wash gold out of the deposits they cut and drop it downstream in their gravel (placers).
         placer = deposits ? new float[w * h] : null;
         for (Volcano v : deposits ? data.volcanoes : List.<Volcano>of()) {
@@ -775,6 +732,70 @@ public final class Terrain {
             for (int dy = -reach; dy <= reach; dy++)
                 for (int dx = -reach; dx <= reach; dx++)
                     deltasByCell.add(cell(c % w + dx, c / w + dy), delta);
+        }
+        // Last: the valleys sample the finished rivers and lakes.
+        valleyGrid = valleys ? new Valleys(this::valleyLand, w, h, BLOCKS_PER_CELL, originX, originY, VALLEY_STEP, zoom,
+                c -> Math.min(hillRoom[c], groundY[c] - SEA_Y) > VALLEY_HIGH) : null;
+    }
+
+    /**
+     * Every volcano's cone at block scale, listed by the cells it reaches. Its own method, out of the constructor: a method
+     * over 8,000 bytes of bytecode is never compiled (HotSpot's DontCompileHugeMethods), and every loop in it runs interpreted.
+     */
+    private void cones() {
+        for (Volcano v : data.volcanoes) {
+            if (v.gone()) continue;
+            boolean legacy = Float.isNaN(v.baseMetres());
+            int style = naturalCones ? v.tuya(h) ? Volcano.TUYA : Volcano.NATURAL : coneStyle;
+            Volcano placed = legacy ? v.withBase(toMetres(cubic(groundY, v.u(), v.v()))) : v;
+            float radius = placed.radiusBlocks(), height = toY(placed.surfaceMetres(0)) - toY(placed.baseMetres());
+            if (height < 8) continue;
+            double cx = wrapBlocks((v.u() - originX) * BLOCKS_PER_CELL), cz = (v.v() - originY) * BLOCKS_PER_CELL;
+            int key = Math.round(v.u() * 7919) ^ Math.round(v.v() * 104729);
+            // Calderas: an old volcano's summit, emptied by its last great eruption, falls in: a wide flat-floored basin
+            // under steep walls, filled by a lake (Crater Lake). Extinct arc volcanoes and middle-aged shields.
+            boolean collapsed = simCalderas && (v.caldera() || volcanoKinds && v.supervolcano()); // from format 22 the simulation built it, lake and all
+            boolean caldera = calderas && !simCalderas && height >= CALDERA_MIN && !v.active()
+                    && hash01(key) < (v.hotspot() ? (v.age() < CALDERA_AGE ? CALDERA_SHIELDS : 0) : CALDERA_SHARE);
+            float craterRadius = collapsed || style == Volcano.TUYA ? 0 : caldera ? CALDERA_RADIUS * radius : radius * (v.hotspot() ? 0.08f : 0.06f) + 5; // a tuya's lava cap: no crater
+            float craterDepth = caldera ? Math.min(CALDERA_DEPTH, 0.3f * height) : Math.min(25, 0.1f * height);
+            // Cinder cones: young volcanoes scatter small steep cones of their own over their flanks.
+            boolean young = v.hotspot() ? v.age() < CINDER_AGE : v.active();
+            float[][] cinders = new float[calderas && young ? 2 + (int) (4 * hash01(key + 1)) : 0][];
+            for (int i = 0; i < cinders.length; i++) {
+                double a = 2 * Math.PI * hash01(key + 10 + i), d = radius * (0.3 + 0.5 * hash01(key + 20 + i));
+                float r = CINDER_RADIUS * (0.6f + 0.8f * hash01(key + 30 + i));
+                cinders[i] = new float[]{(float) (cx + d * Math.cos(a)), (float) (cz + d * Math.sin(a)), r, CINDER_STEEP * r};
+            }
+            // From format 88 maars: where the ground is wet, magma rising beside the volcano meets groundwater and blows
+            // out craters below the land, ringed by low tuff (the Eifel, Ubehebe); a lake fills them in wet country.
+            float wet = bilinear(data.precipitation, v.u(), v.v());
+            Maar[] maarField = new Maar[maars && young && wet > MAAR_RAIN ? 1 + (int) (3 * hash01(key + 50)) : 0];
+            for (int i = 0; i < maarField.length; i++) {
+                float r = MAAR_RADIUS * (0.7f + 0.6f * hash01(key + 60 + i));
+                // Spread round the volcano: two overlapping, one's pit dug beside the other's lake (x -15551 z 6184).
+                double a = 2 * Math.PI * (hash01(key + 70) + (i + 0.3 * hash01(key + 71 + i)) / maarField.length), d = Math.max(0, radius - (2 + MAAR_APRON) * r) * (0.8 + 0.2 * hash01(key + 80 + i)); // low on the flank, where it levels out
+                maarField[i] = new Maar(cx + d * Math.cos(a), cz + d * Math.sin(a), r, wet > MAAR_LAKE_RAIN, new float[]{Float.NaN});
+            }
+            float rim = toY(placed.surfaceMetres(craterRadius)); // the lowest point of the rim holds the crater's pool
+            for (int i = 0; variedVolcanoes && i < 16; i++)
+                rim = Math.min(rim, toY(placed.surfaceMetres(craterRadius * Math.cos(i * Math.PI / 8), craterRadius * Math.sin(i * Math.PI / 8), style)));
+            // From format 42 the cone at block scale stands only as high as erosion left it in the simulation: the ideal
+            // peak laid over a summit the rivers wore down stood as a tower, its crater on top, beside the valleys.
+            float baseY = toY(placed.baseMetres()), topY = toY(placed.surfaceMetres(0));
+            float kept = smoothCones && !legacy ? Math.clamp((groundY[cell(Math.round(v.u()), Math.round(v.v()))] - baseY) / Math.max(1, topY - baseY), 0, 1) : 1;
+            rim = baseY + kept * (rim - baseY);
+            // Lava domes: an arc volcano's sticky lava piles up over the vent instead of flowing away (Mount St Helens).
+            // From format 85 every erupting blown volcano grows one in its horseshoe (Mount St Helens since 1980).
+            float dome = volcanoKinds && !v.hotspot() && !collapsed && style != Volcano.TUYA && (hash01(key + 40) < DOME_SHARE || blownFlanks && v.blown() && v.active())
+                    ? craterRadius * DOME_RADIUS * (0.8f + 0.4f * hash01(key + 41)) : 0;
+            Cone cone = new Cone(placed, cx, cz, radius, craterRadius, craterDepth, height, legacy, caldera, cinders, collapsed, softCeiling(rim),
+                    naturalCones ? Volcano.NATURAL_LOBE_MAX : variedVolcanoes ? Volcano.LOBE_MAX : 1, baseY, kept, dome, softCeiling(rim) - craterDepth * (1 - DOME_RISE * (0.8f + 0.6f * hash01(key + 42))), new float[]{Float.NaN}, maarField, style);
+            // Listed over the whole footprint once lava flows and hot springs reach past the summit.
+            int reach = (int) Math.ceil((landforms ? cone.radius * cone.lobes : cone.reach()) / BLOCKS_PER_CELL) + 1, cu = Math.round(v.u()), cv = Math.round(v.v());
+            for (int dy = -reach; dy <= reach; dy++)
+                for (int dx = -reach; dx <= reach; dx++)
+                    conesByCell.add(cell(cu + dx, cv + dy), cone);
         }
     }
 
@@ -954,13 +975,13 @@ public final class Terrain {
     }
 
     /** Computed once per key: threads asking for one being computed wait for it instead of repeating it. */
-    private static Column[] cached(java.util.concurrent.ConcurrentHashMap<Long, java.util.concurrent.CompletableFuture<Column[]>> map,
-                                   java.util.concurrent.ConcurrentLinkedQueue<Long> order, int limit, int kx, int kz,
-                                   java.util.function.Supplier<Column[]> compute) {
+    private static <T> T cached(java.util.concurrent.ConcurrentHashMap<Long, java.util.concurrent.CompletableFuture<T>> map,
+                                java.util.concurrent.ConcurrentLinkedQueue<Long> order, int limit, int kx, int kz,
+                                java.util.function.Supplier<T> compute) {
         long key = (long) kx << 32 | (kz & 0xffffffffL);
-        java.util.concurrent.CompletableFuture<Column[]> f = map.get(key);
+        java.util.concurrent.CompletableFuture<T> f = map.get(key);
         if (f == null) {
-            java.util.concurrent.CompletableFuture<Column[]> mine = new java.util.concurrent.CompletableFuture<>();
+            java.util.concurrent.CompletableFuture<T> mine = new java.util.concurrent.CompletableFuture<>();
             f = map.putIfAbsent(key, mine);
             if (f == null) {
                 f = mine;
@@ -1541,7 +1562,8 @@ public final class Terrain {
         // Massifs: a range is many peaks, spurs and deep valleys, not one dome. Ridged relief at the 128-512 block
         // scale, growing with height, so plains stay calm and the highest ranges are cut the deepest.
         float ridgeline = 0;
-        if (massifs && Math.min(room, natural - SEA_Y) > 20) {
+        if (valleyGrid != null) natural += valleyGrid.at(x, z); // format 100: the massifs as the water cut them
+        else if (massifs && Math.min(room, natural - SEA_Y) > 20) {
             ridgeline = ridgeline(x, z);
             float high = Math.min(room, natural - SEA_Y), relief = Math.min(talus ? TALUS_MASSIF_RELIEF : MASSIF_RELIEF, MASSIF_SHARE * high) * smoothstep((high - 20) / 60);
             natural += relief * (2 * ridgeline - (talus ? MASSIF_MEAN : 0.8f)); // from format 19 peaks and valleys around the planet's height, not above it
@@ -2725,6 +2747,22 @@ public final class Terrain {
             if (past > 0) in = Math.max(in, wall > 0 ? smoothstep((float) (past / wall)) : 1);
         }
         return in;
+    }
+
+    /**
+     * Format 100: the land Valleys shapes, at unzoomed (x, z): the planet's smooth surface, how much relief it may have
+     * (as much as the massifs had), whether a lake holds it at its level, and the unevenness water finds its way by.
+     */
+    private void valleyLand(double x, double z, float[] out) {
+        double u = warpU(x, z), v = warpV(x, z);
+        float natural = cubic(groundY, u, v), high = Math.min(hillRoom != null ? cubic(hillRoom, u, v) : Float.MAX_VALUE, natural - SEA_Y);
+        out[0] = natural;
+        if (high <= VALLEY_HIGH) { out[1] = out[3] = 0; out[2] = 2; return; }
+        float relief = Math.min(talus ? TALUS_MASSIF_RELIEF : MASSIF_RELIEF, MASSIF_SHARE * high) * smoothstep((high - 20) / 60);
+        out[1] = relief;
+        boolean wet = !Float.isNaN(lakeY[cell((int) Math.round(u), (int) Math.round(v))]); // lakes hold their water's level; rivers are cut later, along the valleys
+        out[2] = wet ? 1 : 0;
+        out[3] = VALLEY_ROUGH * (fine(x, z, 64, 130) + 0.5f * fine(x, z, 16, 131));
     }
 
     /** Ridged massif relief, 0 in the valleys to 1 on the crests: finer ridges ride on the bigger ones. */

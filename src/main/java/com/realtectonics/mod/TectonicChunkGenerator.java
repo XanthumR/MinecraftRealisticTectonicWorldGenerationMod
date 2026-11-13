@@ -461,6 +461,7 @@ public final class TectonicChunkGenerator extends NoiseBasedChunkGenerator {
         BlockState[][] roofs = ceilings == null ? null : roofs(chunk, cols, ceilings);
         super.applyCarvers(region, seed, random, biomes, structures, chunk, step);
         sealCavesFromWater(chunk, cols, ceilings, roofs);
+        if (RealTectonics.terrain().newBiomes && sulfurRock().length > 0) lineSulfurCaves(chunk, cols, sulfurRock());
     }
 
     /**
@@ -573,6 +574,57 @@ public final class TectonicChunkGenerator extends NoiseBasedChunkGenerator {
                 out[lx + lz * 16] = hi - lo < MOUTH_RELIEF ? Math.min(ceiling, ground - Caves.ROOF) : ceiling;
             }
         return out;
+    }
+
+    private static final BlockState[] NO_SULFUR = {};
+    private static volatile BlockState[] sulfurRock; // looked up once the blocks are registered
+
+    /** Format 99: sulfur and cinnabar, Vanilla Backport's on 1.21.1 or the game's own on 26.x; empty without them. */
+    private static BlockState[] sulfurRock() {
+        if (sulfurRock == null) {
+            var s = BuiltInRegistries.BLOCK.getOptional(ResourceLocation.withDefaultNamespace("sulfur"));
+            var c = BuiltInRegistries.BLOCK.getOptional(ResourceLocation.withDefaultNamespace("cinnabar"));
+            sulfurRock = s.isPresent() && c.isPresent() ? new BlockState[]{s.get().defaultBlockState(), c.get().defaultBlockState()} : NO_SULFUR;
+        }
+        return sulfurRock;
+    }
+
+    /**
+     * Format 99: sulfur caves (TectonicBiomeSource: volcanic arcs and volcanoes, deep enough) crusted where hot gas rose
+     * through them: sulfur on the floor 1-3 blocks deep and on the ceiling, cinnabar in patches. The game's own lays the
+     * whole rock in beds of both; here they read as stamped stripes cut off at the province's edge, so the rock stays
+     * the province's. Its sulfur pools and spikes grow only from sulfur. Runs after the carvers, so their tunnels get it too.
+     */
+    private static void lineSulfurCaves(ChunkAccess chunk, Terrain.Column[] cols, BlockState[] sulfur) {
+        int x0 = chunk.getPos().getMinBlockX(), z0 = chunk.getPos().getMinBlockZ();
+        BlockPos.MutableBlockPos pos = new BlockPos.MutableBlockPos();
+        for (int lz = 0; lz < 16; lz++)
+            for (int lx = 0; lx < 16; lx++) {
+                Terrain.Column c = cols[lx + 1 + (lz + 1) * 18];
+                if (c.rock() != Rock.ARC && !c.volcanic()) continue;
+                int x = x0 + lx, z = z0 + lz, depth = 1 + (int) (oreHash(x, 0, z) * 3), sinceAir = Integer.MAX_VALUE;
+                BlockState above = null;
+                for (int y = Math.min(c.ground() - TectonicBiomeSource.UNDER_DEPTH - 1, TectonicBiomeSource.UNDER_TOP); y > chunk.getMinBuildHeight() + 1; y--) {
+                    BlockState b = chunk.getBlockState(pos.set(x, y, z));
+                    boolean air = b.isAir();
+                    if (air && above != null && !above.isAir() && above.getFluidState().isEmpty() && above != BEDROCK) { // the block above is a cave's ceiling
+                        BlockState crust = crust(sulfur, x, y + 1, z);
+                        chunk.setBlockState(pos.set(x, y + 1, z), crust, false);
+                        pos.set(x, y, z);
+                    }
+                    sinceAir = air ? 0 : sinceAir == Integer.MAX_VALUE ? sinceAir : sinceAir + 1;
+                    if (!air && sinceAir <= depth && b.getFluidState().isEmpty() && b != BEDROCK) {
+                        BlockState crust = crust(sulfur, x, y, z);
+                        chunk.setBlockState(pos, crust, false);
+                    }
+                    above = b;
+                }
+            }
+    }
+
+    /** Sulfur, cinnabar in patches a few blocks across. ponytail: two sines, not the game's 3D gradient noise. */
+    private static BlockState crust(BlockState[] sulfur, int x, int y, int z) {
+        return Math.sin(y * 0.3 + 2.5 * Math.sin(x * 0.11) * Math.sin(z * 0.13)) < -0.75 ? sulfur[1] : sulfur[0];
     }
 
     /** Layered bedrock geology: each layer is one rock type everywhere, shifted up and down by the column's fold. */
