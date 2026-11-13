@@ -9,7 +9,8 @@ chunks = {}
 
 def chunk(cx, cz):
     if (cx, cz) not in chunks:
-        path = os.path.join(world, 'dimensions/minecraft/overworld/region', f'r.{cx >> 5}.{cz >> 5}.mca')
+        path = os.path.join(world, 'dimensions/minecraft/overworld/region', f'r.{cx >> 5}.{cz >> 5}.mca') # 26.x
+        if not os.path.exists(path): path = os.path.join(world, 'region', f'r.{cx >> 5}.{cz >> 5}.mca') # 1.21.1
         with open(path, 'rb') as f: data = f.read()
         off = struct.unpack('>I', data[4 * ((cx & 31) + (cz & 31) * 32):][:4])[0]
         if off >> 8 == 0: chunks[(cx, cz)] = None; return None
@@ -36,7 +37,7 @@ for z in range(z0, z1 + 1):
     for x in range(x0, x1 + 1):
         if fixed_y is not None: name = block(x, fixed_y, z)
         else:
-            y = 160
+            y = max((max(chunk(x >> 4, z >> 4) or {0: 0}) + 1) * 16 - 1, 160) # the chunk's highest section: our mountains reach far above 160
             while y > -64 and block(x, y, z) in ('minecraft:air', 'minecraft:cave_air'): y -= 1
             name = block(x, y, z)
         legend.setdefault(name, chr(ord('A') + len(legend)) if name != 'minecraft:water' else '~')

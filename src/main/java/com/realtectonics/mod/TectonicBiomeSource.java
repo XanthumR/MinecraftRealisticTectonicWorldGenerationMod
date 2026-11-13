@@ -22,6 +22,7 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.EnumMap;
 import java.util.Map;
+import java.util.Optional;
 import java.util.stream.Stream;
 
 /**
@@ -48,12 +49,12 @@ public final class TectonicBiomeSource extends BiomeSource {
      * Last column per slot: its surface biome, and from format 60 its ground and rock, looked up the first time a
      * cell low enough to be underground is asked for. Chunks ask once per 4x4x4 cell.
      */
-    private record ColumnCache(long[] keys, Holder<?>[] values, Biome[] sim, int[] ground, Rock[] rock) {}
+    private record ColumnCache(long[] keys, Holder<?>[] values, Biome[] sim, int[] ground, Rock[] rock, boolean[] volcanic) {}
 
     private final ThreadLocal<ColumnCache> cache = ThreadLocal.withInitial(() -> {
         long[] keys = new long[16];
         Arrays.fill(keys, Long.MIN_VALUE);
-        return new ColumnCache(keys, new Holder<?>[16], new Biome[16], new int[16], new Rock[16]);
+        return new ColumnCache(keys, new Holder<?>[16], new Biome[16], new int[16], new Rock[16], new boolean[16]);
     });
 
     static final int UNDER_DEPTH = 24;  // blocks below the ground that a cave biome begins (format 60)
@@ -62,6 +63,12 @@ public final class TectonicBiomeSource extends BiomeSource {
     static final int DEEP_DARK_LAND = 40; // blocks above the sea the ground over the deep dark stands at least
     private static final int UNKNOWN = Integer.MIN_VALUE;
     private final Holder<net.minecraft.world.level.biome.Biome> dripstone, lush, deepDark;
+    static final float NEW_SHARE = 0.2f;  // of a climate's patches that grow as a newer game's biome (format 99)
+    static final int NEW_OFFSET = 8192;   // blocks: those patches read variety this far off, so they don't follow the other stands
+    // Newer Minecraft's biomes, its own on 26.x or Vanilla Backport's on 1.21.1 (both under minecraft:), absent ones left out:
+    // pale gardens among dark forests, dappled forest among temperate woods, sulfur caves under volcanoes
+    private final Map<Biome, Holder<net.minecraft.world.level.biome.Biome>> newer = new EnumMap<>(Biome.class);
+    private final Holder<net.minecraft.world.level.biome.Biome> sulfur;
 
     public TectonicBiomeSource(HolderGetter<net.minecraft.world.level.biome.Biome> registry, String pack) {
         this.pack = AUTO.equals(pack) ? FabricLoader.getInstance().isModLoaded(BOP) ? BOP_VARIED : VANILLA : pack;
@@ -77,6 +84,15 @@ public final class TectonicBiomeSource extends BiomeSource {
         dripstone = registry.getOrThrow(ResourceKey.create(Registries.BIOME, Identifier.withDefaultNamespace("dripstone_caves")));
         lush = registry.getOrThrow(ResourceKey.create(Registries.BIOME, Identifier.withDefaultNamespace("lush_caves")));
         deepDark = registry.getOrThrow(ResourceKey.create(Registries.BIOME, Identifier.withDefaultNamespace("deep_dark")));
+        optional(registry, "pale_garden").ifPresent(h -> newer.put(Biome.DARK_FOREST, h));
+        optional(registry, "dappled_forest").ifPresent(h -> newer.put(Biome.TEMPERATE_FOREST, h));
+        sulfur = optional(registry, "sulfur_caves").orElse(null);
+    }
+
+    private static Optional<Holder<net.minecraft.world.level.biome.Biome>> optional(HolderGetter<net.minecraft.world.level.biome.Biome> registry, String id) {
+        // looking up a biome nobody registers leaves it unbound, and the game then refuses to load any world (26.2 has no dappled forest)
+        if (!exists("minecraft:" + id)) return Optional.empty();
+        return registry.get(ResourceKey.create(Registries.BIOME, Identifier.withDefaultNamespace(id))).map(h -> h);
     }
 
     /**
@@ -200,6 +216,8 @@ public final class TectonicBiomeSource extends BiomeSource {
     protected Stream<Holder<net.minecraft.world.level.biome.Biome>> collectPossibleBiomes() {
         Terrain t = RealTectonics.terrainOrNull();
         Stream<Holder<net.minecraft.world.level.biome.Biome>> surface = biomes.values().stream().flatMap(List::stream);
+        // only from format 99: a new biome's features renumber every feature's decoration seed, so older worlds would get seams
+        if (t != null && t.newBiomes) surface = Stream.concat(surface, Stream.concat(newer.values().stream(), Stream.ofNullable(sulfur)));
         return (t != null && t.undergroundBiomes ? Stream.concat(surface, Stream.of(dripstone, lush, deepDark)) : surface).distinct();
     }
 
@@ -216,6 +234,8 @@ public final class TectonicBiomeSource extends BiomeSource {
             c.sim[slot] = terrain.biomeAtCached(bx, bz);
             var options = biomes.get(c.sim[slot]);
             c.values[slot] = options.size() == 1 ? options.get(0) : options.get((int) (terrain.variety(bx, bz) * options.size()));
+            Holder<net.minecraft.world.level.biome.Biome> n = terrain.newBiomes ? newer.get(c.sim[slot]) : null;
+            if (n != null && terrain.variety(bx + NEW_OFFSET, bz + NEW_OFFSET) < NEW_SHARE) c.values[slot] = n;
             c.ground[slot] = UNKNOWN;
         }
         if (!terrain.undergroundBiomes || by > UNDER_TOP) return (Holder<net.minecraft.world.level.biome.Biome>) c.values[slot];
@@ -223,8 +243,11 @@ public final class TectonicBiomeSource extends BiomeSource {
             Terrain.Column col = terrain.column(bx, bz); // not relaxedColumn: spawn and structure searches would build a tile per spot
             c.ground[slot] = col.ground();
             c.rock[slot] = col.rock();
+            c.volcanic[slot] = col.volcanic();
         }
         if (c.ground[slot] - by < UNDER_DEPTH) return (Holder<net.minecraft.world.level.biome.Biome>) c.values[slot];
+        // format 99: hot sulphurous water rises through volcanic arcs (fumaroles, acid-cut caves) and under any volcano
+        if ((c.volcanic[slot] || c.rock[slot] == Rock.ARC) && sulfur != null && terrain.newBiomes) return sulfur;
         return underground(by, c.ground[slot], c.rock[slot], c.sim[slot], (Holder<net.minecraft.world.level.biome.Biome>) c.values[slot]);
     }
 

@@ -4,7 +4,7 @@ plugins {
 }
 
 group = 'com.realtectonics'
-version = '0.1.2'
+version = '0.1.3'
 base { archivesName = 'realtectonics-fabric-26.2' } // jar: realtectonics-fabric-26.2-<version>.jar
 
 // Client-only mods for the dev client: loaded through fabric.addMods so the dev server runs without them, as a real one would.

@@ -2,7 +2,7 @@
 
 Run jshell scripts from the project root after `./gradlew compileJava -q`:
 
-    "/c/Program Files/Java/jdk-25.0.4/bin/jshell" -R-Xmx6g [-R-Dkey=val ...] --class-path build/classes/java/main tools/X.jsh
+    "/c/Program Files/Java/jdk-21.0.12/bin/jshell" -R-Xmx6g [-R-Dkey=val ...] --class-path build/classes/java/main tools/X.jsh
 
 Most build seed 777 at `PlanetSettings.DEFAULT` (`new Terrain(d, 777, 1, 1, 2)`); images go to `out/`.
 Only the scripts below are maintained. The rest are one-off experiments from past formats (see docs/FORMATS.md); read
@@ -50,6 +50,7 @@ one before trusting it.
 | `faults.jsh` | Fault cells lie in a valley (< 0 m), scarp at the fastest land fault (> 0) |
 | `genbench.jsh` | 8-thread chunk throughput, `-Df1 -Df2` formats; a new format should not be slower |
 | `coltime.jsh` | µs per column |
+| `valleys.jsh` | Format 100 valleys: builds an area at `-Dfa` (99) and `-Dfb` (100), build times, histogram of ground lowered, `out/valleys_cut.png` (red lowered, blue raised); `-Dcx -Dcz -Dn -Dplanet` |
 | `relaxhash.jsh` | Time for a 2048² area through the rockfall tiles and a hash of the result: unchanged by pure speed work (`-Dfmt`) |
 | `relaxprof.jsh` | Where `relaxedColumns` spends its time (JFR inside jshell): own time by line and time inside our methods |
 | `chunkbench.jsh` | Chunk-generation stand-in: 16 biome lookups then 18x18 columns per chunk; `-Dcached=true` checks `biomeAtCached` against `biomeAt` (0 mismatches) |

@@ -1,13 +1,25 @@
 # Changelog
 
-## Unreleased
+## 0.1.3 (2026-11-12)
 
+New worlds only; existing worlds keep their terrain.
+
+- **Vanilla Backport support** (NeoForge 1.21.1), and the same biomes from the game itself on Fabric 26.2:
+  - pale gardens in about a fifth of dark forests;
+  - dappled forest in about a fifth of temperate woods (Vanilla Backport only; 26.2 has none);
+  - sulfur caves deep under volcanic arcs and volcanoes, their floors and ceilings crusted with sulfur and
+    cinnabar, so sulfur pools and spikes grow;
+  - Vanilla Backport's leaf litter, bushes, wildflowers, fallen trees and mobs appear in our biomes too.
+- **Valleys in the mountains** (Small and Medium planets): high land is now shaped by water, with ridges, spurs and
+  side valleys branching like a tree down to the lowlands, instead of smooth swells with noise on top. World
+  creation takes a few seconds longer (Medium: about 8 s for the terrain). Large and Huge keep their mountains.
+- **Faster world creation**: the terrain's setup now runs compiled (Medium 4.4 s to 1.6 s).
 - **Caves stay deep under rivers, lakes, lava and ice**, and beside them: no more rivers floating over a cavern.
 - **Cave entrances only on steep ground** (hillsides, cliffs, mountains); on flat land caves keep a roof of the
   land's own ground, not bare stone.
-- **3D map** on the planet screen: turn, move and zoom the planet in the game's own proportions.
-- William Wythers' Overhauled Overworld works alongside: its ground disks and extra ores are left out, our terrain
-  already lays slopes, scree and snow.
+- **3D map** on the planet screen: drag to turn, right-drag to move, scroll to zoom; heights in the game's own proportions.
+- **William Wythers' Overhauled Overworld** works alongside: its ground disks and extra ores are left out (they
+  halved generation speed and repainted the slopes, scree and snow our terrain already lays).
 
 ## 0.1.2 (2026-11-07)
 
