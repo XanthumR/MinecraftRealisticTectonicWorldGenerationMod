@@ -2,10 +2,18 @@
 
 ## Unreleased
 
+- **No crater shafts on slopes**: a volcano on a steep hillside keeps a crater open downhill instead of a round
+  pit hundreds of blocks deep into the hill (new worlds only).
+- **Rivers rise as creeks**: a river starts as a narrow creek that widens downstream, with uneven banks, instead
+  of a full-width round end in a smooth bowl (new worlds only).
+- **Rivers reach their lakes**: a river flowing into a lake no longer stops 10-15 blocks short of the water on a
+  dry flat (new worlds only).
+- **Ragged rift coasts**: where a supercontinent breaks apart, the new coasts get capes, bays and islands like
+  its outer coasts, instead of smooth curves (new worlds only).
 - **Badlands blend into desert**: no more square patches of desert sand inside the badlands, and their edges no
   longer step along the planet's cells (new worlds only).
 - **No pine forests on badlands plains** with William Wythers' Overhauled Overworld: its mesa-top pines grew on any
-  badlands between y 100 and 150, which on our terrain is most of them.
+  badlands between y 100 and 150, which on our terrain is most of them. Nor its sweet berry thickets on the red sand.
 - **No mud on windswept hills** with WWOO: its ground repainting (volcanic mud and basalt on windswept hills, crusts,
   snow and scree spreads, river carvers, salt lakes, tepuis) is left out; it was made for its own terrain. Its trees,
   plants and decorations stay.

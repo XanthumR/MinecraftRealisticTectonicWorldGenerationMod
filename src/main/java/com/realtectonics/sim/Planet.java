@@ -56,6 +56,7 @@ public final class Planet {
     static final float COAST_WARP = 120;          // cells the supercontinent's outline is pushed around: arms and bays, not a disc
     static final float SUPERCONTINENT_PLATES = 0.4f; // share of the plates born under the supercontinent: the pieces it breaks into
     static final float RIFT_ROUGHNESS = 0.6f;     // noise persistence of the ground plates grow through: how ragged their edges are
+    static final float RIFT_RAGGED = 40;          // format 102: cells a plate edge through a continent is pushed per unit of rough noise (coast-like, ~15 typical, at a 1024 scale)
     /**
      * From format 62: Earth's plates by share of its surface, largest first (PB2002, Bird 2003, rounded): 7 major plates
      * (~80%), 9 minor ones (~15%), then microplates. A planet of N plates aims for the N largest, rescaled to the whole.
@@ -79,6 +80,7 @@ public final class Planet {
     public final boolean[] earthLakes; // Earth's real lakes (Natural Earth); null otherwise
     private final boolean[] gap;     // cells this step's new crust fills
     private final Random rnd, volcanic; // separate streams, so volcanoes don't reshuffle the continents
+    private float[] rough;              // format 102: zero-mean rough noise (coast persistence) that rifts through continents follow; null on Earth
     final long seed;
     private final int[] hotspots;       // fixed in the mantle; plates drift over them
     private final float volcanism;      // how many volcanoes, relative to normal
@@ -169,7 +171,12 @@ public final class Planet {
         earthLakes = null;
         rnd = new Random(seed);
         height = continents(oceanFraction, rnd);
+        rough = Noise.fbm(w, h, scaleWidth / 32, 2, new Random(seed * 131 + 3), COAST_ROUGHNESS); // own stream: same continents and plates
+        float mean = 0;
+        for (float v : rough) mean += v / rough.length;
+        for (int g = 0; g < rough.length; g++) rough[g] -= mean;
         owner = growPlates(plateCount, rnd);
+        raggedEdges(owner, g -> true);
         plates = new Plate[plateCount];
         for (int p = 0; p < plateCount; p++) {
             double angle = rnd.nextDouble() * Math.PI * 2, speed = 0.2 + rnd.nextDouble() * 0.6;
@@ -234,6 +241,51 @@ public final class Planet {
             }
         }
         return own;
+    }
+
+    /**
+     * From format 102 plate edges through continents are as ragged as the coasts, so a rift leaves capes, bays and
+     * islands on both shores instead of a smooth curve: where two fronts of the plates' flood fill met, the fill's fine
+     * noise averaged out along each path, and the rift coasts drawn across the supercontinent's ragged outline looked
+     * cut with a knife. Each continental cell within reach of another plate's continental cell goes over to it where the
+     * rough noise (signed by the pair, so it pushes one way) outruns its distance from the edge: the edge becomes the
+     * level line of distance plus noise, as the coast is of shape plus noise. Cells go over only next to the plate they
+     * join, so no piece of one plate is left adrift inside the other to plough through it as they part. Only cells
+     * where moves(g) holds take part. Returns the cells that changed plate, nearest the edge first.
+     */
+    private int[] raggedEdges(int[] own, java.util.function.IntPredicate moves) {
+        float scale = scaleWidth / 1024f, reach = RIFT_RAGGED * scale * 1.4f; // ~the noise's largest swing
+        int[] dist = new int[w * h], other = new int[w * h], order = new int[w * h];
+        Arrays.fill(dist, Integer.MAX_VALUE);
+        int head = 0, tail = 0;
+        for (int g = 0; g < w * h; g++) {
+            if (height[g] < SEA_LEVEL || !moves.test(g)) continue;
+            for (int n : neighbours(g))
+                if (n >= 0 && own[n] != own[g] && height[n] >= SEA_LEVEL && moves.test(n)) { dist[g] = 0; other[g] = own[n]; order[tail++] = g; break; }
+        }
+        while (head < tail) { // distance from the edge within each plate, and the plate across it
+            int g = order[head++];
+            if (dist[g] + 1 > reach) continue;
+            for (int n : neighbours(g))
+                if (n >= 0 && dist[n] == Integer.MAX_VALUE && own[n] == own[g] && height[n] >= SEA_LEVEL && moves.test(n)) {
+                    dist[n] = dist[g] + 1;
+                    other[n] = other[g];
+                    order[tail++] = n;
+                }
+        }
+        IntStream.Builder moved = IntStream.builder();
+        for (int i = 0; i < tail; i++) {
+            int g = order[i], a = own[g], b = other[g];
+            if (a == b || RIFT_RAGGED * scale * rough[g] * (a < b ? 1 : -1) <= dist[g] + 0.5f) continue;
+            for (int n : neighbours(g)) if (n >= 0 && own[n] == b) { own[g] = b; moved.add(g); break; }
+        }
+        return moved.build().toArray();
+    }
+
+    /** The four neighbours of cell g, -1 past a pole; X wraps. */
+    private int[] neighbours(int g) {
+        int x = g % w, y = g / w;
+        return new int[]{Math.floorMod(x - 1, w) + y * w, (x + 1) % w + y * w, y > 0 ? g - w : -1, y < h - 1 ? g + w : -1};
     }
 
     /** Supercontinents on this planet: one, or one per Medium planet's worth of surface. */
@@ -782,6 +834,15 @@ public final class Planet {
             d.set(lx, ly, big.get(lx, ly));
             big.set(lx, ly, 0);
             owner[g] = dead;
+        }
+        if (rough != null) { // format 102: a ragged rift where it crosses continent
+            int split = dead, whole = largest;
+            for (int g : raggedEdges(owner, k -> owner[k] == whole || owner[k] == split)) {
+                int lx = Math.floorMod(g % w - big.oxi, w), ly = Math.floorMod(g / w - big.oyi, h);
+                Plate to = owner[g] == split ? d : big, from = to == d ? big : d;
+                to.set(lx, ly, from.get(lx, ly));
+                from.set(lx, ly, 0);
+            }
         }
         setVelocity(d, big.vx + nx * RIFT_SPEED, big.vy + ny * RIFT_SPEED);
         setVelocity(big, big.vx - nx * RIFT_SPEED, big.vy - ny * RIFT_SPEED);

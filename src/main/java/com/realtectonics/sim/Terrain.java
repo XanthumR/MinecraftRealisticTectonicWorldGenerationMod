@@ -25,6 +25,9 @@ public final class Terrain {
     static final float HILLS = 4;     // blocks of extra hill relief per zoom step beyond 1
     static final float WIGGLE = 12, PINCH = 0.25f, RAGGED = 1.2f; // wild rivers: blocks of twist, share of width change, blocks of ragged edge
     static final float WILD_CREEK_AREA = 60;  // smaller and every cell of a plain slope grows its own creek: a comb, not a network
+    static final float HEAD_MIN = 0.15f, HEAD_TAPER = 0.7f; // format 104: a river's width at its spring, and the share of its first reach it takes to widen
+    static final float CRATER_MAX_CUT = 3;  // format 105: depths of its own a crater may cut below the land at its middle (a summit standing over the rim is cut away)
+    static final float HEAD_RAGGED = 0.6f;    // format 104: share of their width a river's banks run in and out by at its spring, fading down its first reach
     static final float CREEK_AREA = 50;  // flow where a creek begins: rivers grow out of them instead of appearing full width
     static final int SPLINE_STEPS = 8;
     static final float FALL_MIN = 8;     // blocks a reach drops before it falls at one ledge
@@ -357,6 +360,9 @@ public final class Terrain {
     public final boolean newBiomes;       // newer Minecraft's biomes where the game has them: pale garden, dappled forest, sulfur caves in volcanic arcs (mod): format 99
     private final boolean valleys;        // high land eroded again on points a quarter cell apart: valleys branching like a tree (Valleys): format 100
     private final boolean raggedBadlands; // badlands where the blurred basin rock and noise say, not by the nearest cell (squares of desert): format 101
+    private final boolean lakeMouths;     // a river entering a lake runs on past its first lake cell's centre until it meets the water: format 103
+    private final boolean riverHeads;     // rivers rise narrow, widening down their first reach, with ragged edges and banks there: format 104
+    private final boolean slopeCraters;   // a crater cuts at most CRATER_MAX_CUT depths below the land: on a slope a tilted bowl, not a shaft: format 105
     private final Valleys valleyGrid;     // format 100: the massifs as the water cut them; null before
     private final float[] placer;         // format 92: per cell, share of a river bed's blocks that are gold washed from a deposit upstream
     private volatile byte[] depositCells; // format 92: per cell, the Deposits.Kind ordinal it holds or -1, for the map and /tectonic (lazy)
@@ -525,6 +531,9 @@ public final class Terrain {
         newBiomes = data.format >= 99;
         valleys = data.format >= 100 && data.w <= VALLEY_WIDEST;
         raggedBadlands = data.format >= 101;
+        lakeMouths = data.format >= 103;
+        riverHeads = data.format >= 104;
+        slopeCraters = data.format >= 105;
         coneStyle = blownFlanks ? Volcano.BLOWN : smoothCones ? Volcano.SMOOTH_SCARS : variedVolcanoes ? Volcano.VARIED : Volcano.ROUND;
         snowLine = data.format >= 18;
         iceCapBelow = data.format >= 8 ? Biome.ICE_CAP_BELOW : Biome.OLD_ICE_CAP_BELOW;
@@ -2723,7 +2732,11 @@ public final class Terrain {
         float q = (float) (d * d / (c.craterRadius * c.craterRadius));
         // From format 83 a bowl craterDepth under the rim, rising to meet the land at the crater's edge: whatever stands
         // over the rim there (the summit, a high side) is cut away less the nearer the edge it stands.
-        if (realCraters) return Math.min(ground, Math.round(rim - c.craterDepth * (1 - q) + Math.max(0, ground - rim) * q * q + wobble));
+        // From format 105 never more than CRATER_MAX_CUT depths below the land itself: the rim is the lowest of the ground round
+        // the crater, so a small cone on a steep slope had its bowl cut to under its downhill side, a round shaft 300
+        // blocks deep into the hill above, open only downhill (a player, x -11282 z -3633). Now it follows the slope.
+        if (realCraters) return Math.min(ground, Math.max(Math.round(rim - c.craterDepth * (1 - q) + Math.max(0, ground - rim) * q * q + wobble),
+                slopeCraters ? Math.round(ground - (CRATER_MAX_CUT * c.craterDepth - wobble) * (1 - q)) : Integer.MIN_VALUE));
         // From format 26 a crater is only cut where this volcano is the land: where a neighbour in the chain or a
         // mountain stands higher, the crater ends against it instead of boring a round pit into it.
         // From format 31 it fades out over a crater's depth of rise, so it meets the neighbour as a slope, not a wall.
@@ -2899,7 +2912,20 @@ public final class Terrain {
         River r = nearestRiver(u + mu, v + mv, (byte) 0, WILD_CREEK_AREA);
         if (r == NO_RIVER) return r;
         r = r.widened((1 + 0.5f * low) * (1 + PINCH * fine(x, z, 64, 74)));
-        return new River(r.edge() + RAGGED * fine(x, z, 8, 75), r.half(), r.y(), r.ice(), r.flow(), r.top(), r.bottom(), r.t(), r.cell(), r.incision());
+        float ragged = RAGGED * fine(x, z, 8, 75);
+        // From format 104 a river rises as a creek: on its first reach (no river upstream) it starts at HEAD_MIN of its
+        // width and widens down HEAD_TAPER of the reach, and its banks run in and out by up to HEAD_RAGGED of their
+        // width there (the distance off the water stretched or squeezed, so the creek itself stays whole). It began
+        // full width in a round end with even banks all round: a bowl in rings, as if a sphere had carved it (a
+        // player, x -6034 z -7113).
+        int up = mainDonor[r.cell()];
+        float edge = r.edge() + ragged;
+        if (riverHeads && (up < 0 || data.flow[up] <= WILD_CREEK_AREA)) {
+            r = r.widened(HEAD_MIN + (1 - HEAD_MIN) * smoothstep(r.t() / HEAD_TAPER));
+            edge = r.edge() + ragged;
+            if (edge > 0) edge *= Math.max(0.3f, 1 + HEAD_RAGGED * (1 - r.t()) * (fine(x, z, 16, 105) + 0.5f * fine(x, z, 8, 106)));
+        }
+        return new River(edge, r.half(), r.y(), r.ice(), r.flow(), r.top(), r.bottom(), r.t(), r.cell(), r.incision());
     }
 
 
@@ -3032,8 +3058,17 @@ public final class Terrain {
                 double au = iu + dx, bu = au + wrap(r % w - c % w), bv = r / w;
                 double su = bu - au, sv = bv - cy;
                 // A fjord's mouth runs on one more cell out to sea: its first sea cell can be a pocket the smooth coastline closes.
-                double reach = minIce == Hydrology.FJORD && data.metres[r] < 0 ? 2 : 1;
+                // From format 103 a river entering a lake runs on along its reach past the first lake cell's centre,
+                // while the lake deepens, until it meets the water (blurred lake share 0.5): that cell is a shore cell,
+                // under half lake, and the river ended at its centre 10-15 blocks short of the water, across a dry flat
+                // at the lake's level (x 1266 z 770, a player's report). Not into the lake, where its banks were ridges.
+                boolean mouth = lakeMouths && minIce == 0 && !Float.isNaN(lakeY[r]);
+                double reach = minIce == Hydrology.FJORD && data.metres[r] < 0 || mouth ? 2 : 1;
                 double t = Math.clamp(((u - au) * su + (v - cy) * sv) / (su * su + sv * sv), 0, reach);
+                if (mouth && t > 1) {
+                    float lake = cubic(lakes, u, v);
+                    if (lake > 0.5f || lake < lakes[r]) t = 1;
+                }
                 float dist = (float) hyp(u - au - t * su, v - cy - t * sv) * blocksPerCell; // real blocks: rivers keep their width
                 float half = riverWidth * Math.min(40, organic ? 0.5f + 0.13f * (float) Math.sqrt(data.flow[c]) : 2 + 0.12f * (float) Math.sqrt(data.flow[c]));
                 if (organic && t <= 1 && dist - BULGE * blocksPerCell - half < best.edge) {
