@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+- **Badlands blend into desert**: no more square patches of desert sand inside the badlands, and their edges no
+  longer step along the planet's cells (new worlds only).
+- **No pine forests on badlands plains** with William Wythers' Overhauled Overworld: its mesa-top pines grew on any
+  badlands between y 100 and 150, which on our terrain is most of them.
+- **No mud on windswept hills** with WWOO: its ground repainting (volcanic mud and basalt on windswept hills, crusts,
+  snow and scree spreads, river carvers, salt lakes, tepuis) is left out; it was made for its own terrain. Its trees,
+  plants and decorations stay.
+
 ## 0.1.3 (2026-11-12)
 
 New worlds only; existing worlds keep their terrain.
