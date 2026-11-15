@@ -193,7 +193,7 @@ public final class TectonicChunkGenerator extends ChunkGenerator {
      * Nor its other ground repainting (`wythers:terrain/...`), made for its own terrain, which ours replaces: its
      * windswept hills are volcanic, resurfaced with mud, deepslate and basalt cliffs wherever the biome is (a player
      * found mud on dry hills at 2,600 m, x 7683 z -1608), and its badlands crusts, snow and scree spreads, salt lakes and
-     * tepuis are stamps where the planet has its own. WWOO's trees (but its mesa pines), plants, rocks and decor stay.
+     * tepuis are stamps where the planet has its own. WWOO's trees (but its mesa pines), plants (but its badlands berries), rocks and decor stay.
      * Only the per-chunk lookup changes: the step indices, so other features' seeds, stay.
      */
     private static BiomeGenerationSettings decoration(Holder<net.minecraft.world.level.biome.Biome> biome) {
@@ -214,12 +214,15 @@ public final class TectonicChunkGenerator extends ChunkGenerator {
         Feature<?> type = f.value().feature().value().feature();
         return f.unwrapKey().map(k -> k.identifier().getNamespace().equals("wythers")
                 && (type == Feature.DISK || type == Feature.ORE || type == Feature.SCATTERED_ORE || k.identifier().getPath().startsWith("terrain/")
-                || k.identifier().getPath().equals(MESA_PINES))).orElse(false);
+                || LEFT_OUT.contains(k.identifier().getPath()))).orElse(false);
     }
 
     // WWOO's pines on its own badlands' mesa tops, placed wherever the ground stands 100-150 blocks up: on our terrain that
     // is any badlands plain at 1,000-1,700 m, and they grew there as a dense forest on the red sand (x 4419 z -1802).
-    private static final String MESA_PINES = "vegetation/local/trees/pine_mesa";
+    // Its badlands berries: ripe sweet berry bushes in patches on bare red sand, half its tries (the rest on grass, which
+    // its badlands had and ours don't); thickets of berries on desert sand (x 2977 z -2542).
+    private static final java.util.Set<String> LEFT_OUT = java.util.Set.of("vegetation/local/trees/pine_mesa",
+            "vegetation/local/patch/berries_badlands");
 
     public PlanetSettings planet() {
         return planet;

@@ -105,10 +105,10 @@ class TerrainTest {
         assertTrue(confirmed >= waterPixels * 0.9, "map water missing in the game: " + confirmed + " of " + waterPixels);
 
         // Volcanoes survive saving, and erupting ones hold their lava lakes inside the crater (from format 81 a lava dome
-        // plugs some vents, so the first with lava counts).
+        // plugs some vents, and under the sea there is none, so the first with lava counts).
         assertEquals(data.volcanoes, loaded.volcanoes);
         int r = 120, side = 2 * r + 1, lava = 0;
-        for (Volcano erupting : loaded.volcanoes.stream().filter(Volcano::active).limit(5).toList()) {
+        for (Volcano erupting : loaded.volcanoes.stream().filter(Volcano::active).toList()) {
             if (lava > 0) break;
             int[] summit = t.blockOf((int) erupting.u() + (int) erupting.v() * loaded.w);
             Terrain.Column[] crater = new Terrain.Column[side * side];
