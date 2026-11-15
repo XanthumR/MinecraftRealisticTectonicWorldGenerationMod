@@ -37,6 +37,7 @@ public final class Planet {
     static final int ARC_MIN = 3, ARC_MAX = 6;    // cells from trench to volcanic arc (~150-250 km, as on Earth)
     static final int ARC_SPACING = 10;            // cells between arc volcanoes; Earth's are closer, but this is a game
     static final int HOTSPOT_PERIOD = 20;         // steps between eruptions of a hotspot
+    static final int HOTSPOT_GAP = 4;             // format 106: cells (128 blocks) a plate must carry a hotspot volcano off before the next one is born
     static final float RIFT_SPREAD = 0.1f;        // cells per step two plates must separate by to tear a continent
     static final int RIFT_VOLCANO_SPACING = 40;   // cells between rift volcanoes: one or two per rift, or their cones fill it
     static final float COLLISION_MEMORY = 0.998f; // folding is all but permanent: old belts like the Appalachians stay deformed
@@ -526,7 +527,12 @@ public final class Planet {
         for (int i = 0; recyclePlate(c) && ++i < regions(); ) c = centroids(); // one per Medium planet's worth of plates, so each continent rifts as often
         for (int[] s : seamounts) s[1] = owner[s[0]]; // a rift or merger hands them to the plate now under them
         if (++stepCount % HOTSPOT_PERIOD == 0)
-            for (int g : hotspots) seamounts.add(new int[]{g, owner[g], stepCount});
+            for (int g : hotspots) { // format 106: a plate that hasn't carried the last volcano HOTSPOT_GAP away feeds it again: one bigger shield, not a heap of cones
+                int[] near = null;
+                for (int[] s : seamounts) if (s[1] == owner[g] && Math.hypot(dx(s[0] % w, g % w), s[0] / w - g / w) < HOTSPOT_GAP) near = s;
+                if (near != null) near[2] = stepCount;
+                else seamounts.add(new int[]{g, owner[g], stepCount});
+            }
         markRows();
     }
 

@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **Hotspot volcanoes spaced out**: a plate drifting slowly over a hotspot builds one bigger shield volcano instead
+  of a heap of cones 30-60 blocks apart; the next one rises at least 128 blocks on (new worlds only).
 - **No crater shafts on slopes**: a volcano on a steep hillside keeps a crater open downhill instead of a round
   pit hundreds of blocks deep into the hill (new worlds only).
 - **Rivers rise as creeks**: a river starts as a narrow creek that widens downstream, with uneven banks, instead
