@@ -189,8 +189,12 @@ public final class TectonicChunkGenerator extends ChunkGenerator {
      * Each biome's features without William Wythers' Overhauled Overworld's ground disks and extra ores: 30-256 disks a
      * chunk, each testing ~2,000 blocks and their neighbours to find slopes to paint stone, scree or snow on (half the
      * generation time on our land), and 50-100 ore veins a chunk in windswept and volcanic country. Our columns already
-     * lay rock on steep slopes, scree and snow from the planet, and our deposits put the ores where the geology did;
-     * WWOO's trees, plants and rocks stay. Only the per-chunk lookup changes: the step indices, so other features' seeds, stay.
+     * lay rock on steep slopes, scree and snow from the planet, and our deposits put the ores where the geology did.
+     * Nor its other ground repainting (`wythers:terrain/...`), made for its own terrain, which ours replaces: its
+     * windswept hills are volcanic, resurfaced with mud, deepslate and basalt cliffs wherever the biome is (a player
+     * found mud on dry hills at 2,600 m, x 7683 z -1608), and its badlands crusts, snow and scree spreads, salt lakes and
+     * tepuis are stamps where the planet has its own. WWOO's trees (but its mesa pines), plants, rocks and decor stay.
+     * Only the per-chunk lookup changes: the step indices, so other features' seeds, stay.
      */
     private static BiomeGenerationSettings decoration(Holder<net.minecraft.world.level.biome.Biome> biome) {
         return DECORATION.computeIfAbsent(biome, b -> {
@@ -208,9 +212,14 @@ public final class TectonicChunkGenerator extends ChunkGenerator {
 
     private static boolean groundDisk(Holder<PlacedFeature> f) {
         Feature<?> type = f.value().feature().value().feature();
-        return (type == Feature.DISK || type == Feature.ORE || type == Feature.SCATTERED_ORE)
-                && f.unwrapKey().map(k -> k.identifier().getNamespace().equals("wythers")).orElse(false);
+        return f.unwrapKey().map(k -> k.identifier().getNamespace().equals("wythers")
+                && (type == Feature.DISK || type == Feature.ORE || type == Feature.SCATTERED_ORE || k.identifier().getPath().startsWith("terrain/")
+                || k.identifier().getPath().equals(MESA_PINES))).orElse(false);
     }
+
+    // WWOO's pines on its own badlands' mesa tops, placed wherever the ground stands 100-150 blocks up: on our terrain that
+    // is any badlands plain at 1,000-1,700 m, and they grew there as a dense forest on the red sand (x 4419 z -1802).
+    private static final String MESA_PINES = "vegetation/local/trees/pine_mesa";
 
     public PlanetSettings planet() {
         return planet;

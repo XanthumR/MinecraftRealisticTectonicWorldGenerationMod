@@ -73,6 +73,7 @@ public final class Terrain {
     static final float CRATER_HEAT = 2.5f;            // format 38: craters' radii from an active vent within which its heat keeps ice off
     static final float CHERRY_PATCH = 0.45f, BADLANDS_METRES = 500; // cherry groves are rare; deserts this high are badlands
     static final float SOFT_BADLANDS_METRES = 800; // format 44: sedimentary deserts this high are badlands
+    static final float BASIN_RAGGED = 0.25f;       // format 101: share of the blurred basin rock the badlands' edge wanders by (noise over 64 blocks)
     static final float CALDERA_SHARE = 0.45f, CALDERA_SHIELDS = 0.35f, CALDERA_ISLANDS = 0.5f; // extinct arc volcanoes, shields, calderas with an island
     static final float CALDERA_RADIUS = 0.16f, CALDERA_DEPTH = 70, CALDERA_MIN = 40, CALDERA_LAKE = 0.35f; // of the footprint; blocks at most; smallest volcano; lake this far below the rim, of the depth
     static final int CALDERA_AGE = 120, CINDER_AGE = 60;  // shields older than this have worn their caldera away; younger than this still sprout cinder cones
@@ -355,6 +356,7 @@ public final class Terrain {
     public final boolean deepCaves;       // caves stay deep under water and beside it, and open to the sky only on steep ground (mod): format 98
     public final boolean newBiomes;       // newer Minecraft's biomes where the game has them: pale garden, dappled forest, sulfur caves in volcanic arcs (mod): format 99
     private final boolean valleys;        // high land eroded again on points a quarter cell apart: valleys branching like a tree (Valleys): format 100
+    private final boolean raggedBadlands; // badlands where the blurred basin rock and noise say, not by the nearest cell (squares of desert): format 101
     private final Valleys valleyGrid;     // format 100: the massifs as the water cut them; null before
     private final float[] placer;         // format 92: per cell, share of a river bed's blocks that are gold washed from a deposit upstream
     private volatile byte[] depositCells; // format 92: per cell, the Deposits.Kind ordinal it holds or -1, for the map and /tectonic (lazy)
@@ -522,6 +524,7 @@ public final class Terrain {
         deepCaves = data.format >= 98;
         newBiomes = data.format >= 99;
         valleys = data.format >= 100 && data.w <= VALLEY_WIDEST;
+        raggedBadlands = data.format >= 101;
         coneStyle = blownFlanks ? Volcano.BLOWN : smoothCones ? Volcano.SMOOTH_SCARS : variedVolcanoes ? Volcano.VARIED : Volcano.ROUND;
         snowLine = data.format >= 18;
         iceCapBelow = data.format >= 8 ? Biome.ICE_CAP_BELOW : Biome.OLD_ICE_CAP_BELOW;
@@ -3241,8 +3244,11 @@ public final class Terrain {
         }
         // From format 44 badlands only where soft layered rock (a sedimentary basin) stands high and is cut up (the
         // Colorado Plateau, the Dakota badlands); a high desert on old shield rock is sand and stone (the Sahara, Arabia).
+        // From format 101 by the basin rock blurred over cells, with a wandering edge: the nearest cell's rock left
+        // straight-edged squares of desert in the badlands (x 4321 z -2568, a player's report).
         if (b == Biome.DESERT && metres > (softBadlands ? SOFT_BADLANDS_METRES : BADLANDS_METRES)
-                && (!softBadlands || Rock.of(data.rock[cell((int) Math.round(warpU(x, z)), (int) Math.round(warpV(x, z)))]) == Rock.BASIN))
+                && (!softBadlands || (raggedBadlands ? bilinear(sediment, warpU(x, z), warpV(x, z)) + BASIN_RAGGED * noise(x, z, 64, 58) > 0.5f
+                        : Rock.of(data.rock[cell((int) Math.round(warpU(x, z)), (int) Math.round(warpV(x, z)))]) == Rock.BASIN)))
             return rain > 200 ? Biome.WOODED_BADLANDS : Biome.BADLANDS;
         if (massifs && b == Biome.ICE_CAP) return noise(x, z, 256, 67) > ICE_SPIKE_PATCH ? Biome.ICE_SPIKES : Biome.SNOWY_PLAINS;
         return b;
