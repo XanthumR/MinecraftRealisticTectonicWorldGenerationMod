@@ -34,6 +34,9 @@ public final class Hydrology {
     static final int DOME_SPACING = 20;         // cells between dome middles
     static final float DOME_METRES = 2500;      // how far a typical dome bowed the beds up at its middle (the Black Hills ~2.5 km; erosion takes about half back off the top)
     static final float VOLCANO_YOUTH = 0.33f;   // share of the erosion the volcanoes stand through: they are young beside the land
+    static final float BELT_UPLIFT = 0.15f;      // format 112: crust units a pass a still-active collision belt rises while the rivers cut it (0.3 ran belts into MAX_CRUST)
+    static final float BELT_FULL = 1;           // format 112: Planet.orogeny (blurred) at which a belt rises at the full rate
+    static final int BELT_REACH = 3;            // format 112: blurs of the suture's activity: how many cells inland the belt rises
     static final float CALDERA_SINK = 0.4f;     // of a collapsing volcano's height its summit sinks by, at most Volcano.CALDERA_DEPTH
     static final float CONE_BLEND = 400;        // metres over which two overlapping volcanoes' slopes round into each other
     static final float SUPER_DEPTH = 600;       // metres a supervolcano's caldera block sinks (Toba's lake is 500 m deep)
@@ -195,6 +198,7 @@ public final class Hydrology {
         // out sharp, and still before the last rivers, so water runs off their flanks instead of under them.
         float[] beforeCones = null;
         int conesAt = (int) (iterations * (1 - VOLCANO_YOUTH));
+        float[] uplift = beltUplift(planet);
         for (int i = 0; i < iterations; i++) {
             if (Thread.currentThread().isInterrupted()) throw new CancellationException();
             if (i == conesAt) beforeCones = buildCones(planet);
@@ -202,6 +206,7 @@ public final class Hydrology {
             markGlaciers();
             erode();
             creep();
+            if (uplift != null) for (int g = 0; g < uplift.length; g++) if (uplift[g] > 0 && elevation[g] > 0) elevation[g] = Math.min(Planet.MAX_CRUST - Planet.SEA_LEVEL, elevation[g] + uplift[g]);
             progress.accept((i + 1) / (double) (iterations + 1));
         }
         if (beforeCones == null) beforeCones = buildCones(planet); // no erosion at all
@@ -211,6 +216,20 @@ public final class Hydrology {
         markFjords();
         markLakes();
         accumulate(); // lakes keep what they evaporate: below a lake with no outlet, the river is gone
+    }
+
+    /**
+     * Format 112: a range still being pushed together keeps rising while its rivers cut it, as the Himalaya rise about
+     * as fast as they wear down; before, the 50 passes ran with the plates stopped and wore every belt down like a dead
+     * one (the Appalachians), 7-9 km sutures to ~1.2 km. The rise follows each cell's recent collision (Planet.orogeny),
+     * spread a few cells inland as the thickened crust is. Null when the planet never stepped (Earth).
+     */
+    private float[] beltUplift(Planet planet) {
+        if (planet.orogeny == null || BELT_UPLIFT <= 0) return null;
+        float[] u = planet.orogeny.clone();
+        for (int pass = 0; pass < BELT_REACH; pass++) blur(u);
+        for (int g = 0; g < u.length; g++) u[g] = BELT_UPLIFT * Math.min(1, u[g] / BELT_FULL);
+        return u;
     }
 
     /** Puts every volcano's cone into the land; returns the land as it was before them. */

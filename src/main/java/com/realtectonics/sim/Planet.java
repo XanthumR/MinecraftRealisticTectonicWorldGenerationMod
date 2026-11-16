@@ -24,6 +24,8 @@ public final class Planet {
     static final float SUBDUCTION_UPLIFT = 0.15f; // volcanic arcs (Andes, Japan)
     static final float COLLISION_UPLIFT = 1.0f;   // continents never sink: all mass folds up (Himalaya)
     static final float DIFFUSION = 0.04f;         // hillslope creep; rivers do the rest, interleaved with the plates
+    static final float THICK = 5.5f;             // format 112: crust units past which thickened continental crust flows sideways under its own weight (~1.5 km high): belts 2-4 cells wide, not one-cell walls
+    static final float THICK_FLOW = 0.2f;         // format 112: share of the thickness difference past THICK a cell passes to a neighbour a step (with DIFFUSION under 1/4: stable)
     static final float COLLISION_DRAG = 0.03f;    // per overlapping continent cell: a 50-cell front stops a plate in a few steps (format 109; 0.002 before, ~30 steps, and colliding continents ate each other: 30% land to 17% in 1200 steps)
     static final float OLD_OCEAN = OCEAN + 0.2f;  // ocean floor this cold and dense sinks at trenches
     static final float SLAB_PULL = 0.00025f;      // per trench cell; terminal speed = pull * trench length / drag
@@ -31,6 +33,13 @@ public final class Planet {
     static final float MAX_SPEED = 0.9f;          // step() assumes plates shift at most one cell per step
     static final float MIN_PLATE_FRACTION = 1 / 400f; // smaller plates weld onto a neighbour
     static final float RIFT_SPEED = 0.3f;         // how hard the two halves of a rifted plate push apart
+    static final float SPLIT_STRETCH = 0.4f; // format 110: back-arc stretching (backArc, 0-1) at which the crust behind a trench tears through
+    static final int SPLIT_CELLS = 40;            // cells that stretched before a plate tears, and the least a strip or what is left may hold
+    static final int SPLIT_DEPTH = Planet.ARC_MAX + 1; // cells from the trench the torn-off strip reaches: the arc and its forearc
+    static final float SPLIT_SPEED = 0.15f; // cells per step a young strip rolls back off its parent toward its trench, opening the sea behind it
+    static final int SPLIT_LIFE = 70;             // steps it rolls back: ~SPLIT_SPEED x SPLIT_LIFE cells of sea (the Sea of Japan ~10 cells at Medium)
+    static final float SPLIT_REACH = 0.05f; // blurred stretching that takes a cell near the trench into the strip: the whole stretched coast, not its strongest patches
+    static final int SPLIT_EVERY = 5, SPLIT_GRACE = 150, SPLIT_GAP = 60; // steps between looks for a tear; steps a strip keeps its own plate before it may be welded on; steps between two tears
     static final float SUBDUCTION_MEMORY = 0.97f; // trench activity fades over ~30 steps: only live arcs erupt
     static final float ARC_ACTIVITY = 5;          // recent subduction needed for an arc behind it
     public static final float RIDGE_ACTIVITY = 2; // recent spreading that makes a cell a ridge axis (a gap opens every 1/speed steps)
@@ -43,6 +52,7 @@ public final class Planet {
     static final float RIFT_SPREAD = 0.1f;        // cells per step two plates must separate by to tear a continent
     static final int RIFT_VOLCANO_SPACING = 40;   // cells between rift volcanoes: one or two per rift, or their cones fill it
     static final float COLLISION_MEMORY = 0.998f; // folding is all but permanent: old belts like the Appalachians stay deformed
+    static final float OROGENY_MEMORY = 0.98f;    // format 112: a belt counts as still rising for ~50 steps after its last collision
     static final int FAULT_WINDOW = 3;            // cells around a boundary cell that give the boundary its direction
     static final int FAULT_REACH = 4;             // cells either side of a strike-slip boundary its distance field reaches; past it, the field stops signing sides
     static final float FAULT_MIN_SLIP = 0.05f;    // cells per step of sliding that make a boundary a fault worth showing
@@ -77,6 +87,7 @@ public final class Planet {
     public final int[] owner;    // plate index per global cell
     public final float[] subduction; // recent subduction per cell: arc volcanoes rise behind active trenches
     public final float[] collision;  // recent continent-continent collision per cell: mountain belts, folded rock
+    public float[] orogeny;          // format 112: collision over the last ~OROGENY_MEMORY steps only, the belts still rising when the plates stop; not saved, null until a step
     public final float[] spreading;  // recent new crust per cell: where plates pull apart, the axis of a mid-ocean ridge
     public final boolean earth;      // today's Earth (EarthData), not simulated: it never steps, and Hydrology takes its relief as it is
     private final float[] earthSlip; // Earth's fault slip from PB2002's transform faults, in place of strikeSlip's; null otherwise
@@ -95,6 +106,7 @@ public final class Planet {
     private double[][] homes;             // with Medium-sized continents: {x, y} of each first supercontinent, which its pieces drift away from; null otherwise
     private boolean gathering;
     private int phaseStart, lastBreakup = Integer.MAX_VALUE; // step the current phase began; step of the planned final breakup
+    private int lastSplit = Integer.MIN_VALUE / 2; // format 110: step the last back-arc strip tore off
     private final double firstSpread;     // mean distance of continental cells from their centre in the first supercontinent
 
     public static final class Plate {
@@ -105,6 +117,9 @@ public final class Planet {
         float ox, oy;        // offset of local frame in global cells
         int oxi, oyi;
         float vx, vy;        // cells per step, |v| < 1
+        int born = Integer.MIN_VALUE / 2; // format 110: step a back-arc strip broke off as this plate; long ago for the rest
+        int parent = -1;     // format 110: while young, the plate a back-arc strip tore from; -1 for the rest
+        float pullX, pullY;  // format 110: unit direction toward the strip's trench, which it rolls back along
 
         Plate(int width, int height, float vx, float vy) {
             tilesX = width / TILE;
@@ -517,6 +532,7 @@ public final class Planet {
         AtomicIntegerArray collisions = new AtomicIntegerArray(plates.length);
         int[] area = new int[plates.length];
         for (int o : owner) area[o]++;
+        if (orogeny == null) orogeny = new float[w * h];
         IntStream.range(0, h).parallel().forEach(y -> compositeRow(y, collisions, area));
         spreadEvenly();
         growArcs();
@@ -533,7 +549,13 @@ public final class Planet {
         Centroids c = centroids();
         slabPull(c);
         mantleFlow(1);
+        for (Plate q : plates) { // format 110: a young back-arc strip rolls back off the plate it tore from, the sea behind it widening; then moves with it, so the sea stays open
+            if (q.parent < 0) continue;
+            float roll = stepCount - q.born < SPLIT_LIFE ? SPLIT_SPEED : 0;
+            setVelocity(q, plates[q.parent].vx + q.pullX * roll, plates[q.parent].vy + q.pullY * roll);
+        }
         for (int i = 0; recyclePlate(c) && ++i < regions(); ) c = centroids(); // one per Medium planet's worth of plates, so each continent rifts as often
+        if (stepCount % SPLIT_EVERY == 0 && stepCount - lastSplit >= SPLIT_GAP) splitBackArc();
         for (int[] s : seamounts) s[1] = owner[s[0]]; // a rift or merger hands them to the plate now under them
         if (++stepCount % HOTSPOT_PERIOD == 0)
             for (int g : hotspots) { // format 106: a plate that hasn't carried the last volcano HOTSPOT_GAP away feeds it again: one bigger shield, not a heap of cones
@@ -812,26 +834,12 @@ public final class Planet {
             // From format 62 a microplate is welded on only once it has shrunk to a quarter of its share: at a fixed
             // 1/400 Earth's microplates died at once, their slots split the largest plates, and all ended alike.
             double min = shares == null ? MIN_PLATE_FRACTION : Math.min(MIN_PLATE_FRACTION, shares[p] / 4);
-            if (c.area[p] < w * h * min && (dead < 0 || c.area[p] < c.area[dead])) dead = p;
+            if (c.area[p] < w * h * min && stepCount - plates[p].born >= SPLIT_GRACE && (dead < 0 || c.area[p] < c.area[dead])) dead = p; // a young back-arc strip is left to drift off
         }
         if (dead < 0) return false;
         Plate d = plates[dead], big = plates[largest];
 
-        int[] contact = new int[plates.length];
-        for (int g = 0; g < w * h; g++) {
-            if (owner[g] != dead) continue;
-            int x = g % w, y = g / w;
-            for (int nb : new int[]{Math.floorMod(x - 1, w) + y * w, (x + 1) % w + y * w, y > 0 ? g - w : -1, y < h - 1 ? g + w : -1})
-                if (nb >= 0 && owner[nb] != dead) contact[owner[nb]]++;
-        }
-        int host = 0;
-        for (int p = 1; p < plates.length; p++) if (contact[p] > contact[host]) host = p;
-        for (int g = 0; g < w * h; g++) {
-            if (owner[g] != dead) continue;
-            setCrust(plates[host], g % w, g / w, height[g]);
-            owner[g] = host;
-        }
-        d.clear();
+        weldOn(dead);
 
         // Rift: everything on one side of a wiggly line through the centroid moves to the reused slot.
         double angle = rnd.nextDouble() * Math.PI * 2, nx = Math.cos(angle), ny = Math.sin(angle);
@@ -859,6 +867,7 @@ public final class Planet {
                 from.set(lx, ly, 0);
             }
         }
+        d.parent = -1;
         setVelocity(d, big.vx + nx * RIFT_SPEED, big.vy + ny * RIFT_SPEED);
         setVelocity(big, big.vx - nx * RIFT_SPEED, big.vy - ny * RIFT_SPEED);
         return true;
@@ -929,10 +938,11 @@ public final class Planet {
             }
             subduction[g] = subduction[g] * SUBDUCTION_MEMORY + (subducting ? 1 : 0);
             collision[g] = collision[g] * COLLISION_MEMORY + (colliding ? 1 : 0);
+            orogeny[g] = orogeny[g] * OROGENY_MEMORY + (colliding ? 1 : 0);
             spreading[g] = spreading[g] * SUBDUCTION_MEMORY + (spreads ? 1 : 0);
             gap[g] = spreads;
             if (bestC < SEA_LEVEL) bestC = Math.max(OCEAN, bestC - OCEAN_AGING);
-            bestC = Math.min(bestC, MAX_CRUST); // ponytail: excess mass just vanishes; spread it sideways if plateaus look too flat
+            bestC = Math.min(bestC, 2 * MAX_CRUST); // format 112: diffuseRow spreads it inland before MAX_CRUST; past twice that it vanishes
             plates[best].set(wrapX(x + shift[best]), row[best], bestC);
             owner[g] = best;
             height[g] = bestC;
@@ -984,6 +994,96 @@ public final class Planet {
         }
     }
 
+    /** The dead plate's crust goes to the neighbour it touches most, and its slot is left empty. */
+    private void weldOn(int dead) {
+        Plate d = plates[dead];
+        int[] contact = new int[plates.length];
+        for (int g = 0; g < w * h; g++) {
+            if (owner[g] != dead) continue;
+            int x = g % w, y = g / w;
+            for (int nb : new int[]{Math.floorMod(x - 1, w) + y * w, (x + 1) % w + y * w, y > 0 ? g - w : -1, y < h - 1 ? g + w : -1})
+                if (nb >= 0 && owner[nb] != dead) contact[owner[nb]]++;
+        }
+        int host = 0;
+        for (int p = 1; p < plates.length; p++) if (contact[p] > contact[host]) host = p;
+        for (int g = 0; g < w * h; g++) {
+            if (owner[g] != dead) continue;
+            setCrust(plates[host], g % w, g / w, height[g]);
+            owner[g] = host;
+        }
+        d.clear();
+        d.parent = -1;
+        d.born = Integer.MIN_VALUE / 2; // the slot is no young strip any more
+        for (Plate q : plates) if (q.parent == dead) q.parent = -1; // its strips go their own way
+    }
+
+    /**
+     * Format 110: back-arc seas. Where the crust behind a trench is stretched hard (a trench rolling back, backArc), it
+     * tears through: the strip on the trench side (the arc and its forearc) breaks off as its own plate and moves off
+     * toward the trench, and the gap behind fills with new sea floor, a sea that widens as it goes (the Sea of Japan
+     * opening behind Japan, the Tyrrhenian behind Calabria). The strip keeps its trench, so its arc keeps growing. The
+     * plate count is fixed: the smallest other plate welds onto its neighbour to give the strip a slot. Thinning the
+     * stretched crust in place could not open one: land creep refilled it, and only coasts sank.
+     */
+    private void splitBackArc() {
+        float[] stretch = backArc()[0];
+        int n = plates.length, torn = -1;
+        int[] strong = new int[n], area = new int[n];
+        for (int g = 0; g < w * h; g++) {
+            area[owner[g]]++;
+            if (stretch[g] >= SPLIT_STRETCH) strong[owner[g]]++;
+        }
+        for (int p = 0; p < n; p++)
+            if (strong[p] >= SPLIT_CELLS && stepCount - plates[p].born >= SPLIT_GRACE && (torn < 0 || strong[p] > strong[torn])) torn = p;
+        if (torn < 0) return;
+        float[] reach = stretch.clone(); // the stretching spread a few cells trenchward, over the strip in front of it
+        for (int pass = 0; pass < 3; pass++) Geology.blur(reach, w, h);
+        int[] dist = trenchDistance(SPLIT_DEPTH);
+        boolean[] strip = new boolean[w * h];
+        int count = 0;
+        double sx = 0, sy = 0, rx = 0, ry = 0, ax = -1; // the strip's and the rest's mean place, round the wrap from a point on the plate
+        for (int g = 0; g < w * h; g++) {
+            if (owner[g] != torn) continue;
+            if (ax < 0) ax = g % w;
+            double x = dx(ax, g % w), y = g / w;
+            if (dist[g] <= SPLIT_DEPTH && reach[g] > SPLIT_REACH) { strip[g] = true; count++; sx += x; sy += y; }
+            else { rx += x; ry += y; }
+        }
+        int rest = area[torn] - count;
+        if (count < SPLIT_CELLS || rest < SPLIT_CELLS) return;
+        int dead = -1;
+        for (int p = 0; p < n; p++) if (p != torn && (dead < 0 || area[p] < area[dead])) dead = p;
+        weldOn(dead);
+        Plate d = plates[dead], big = plates[torn];
+        d.ox = big.ox;
+        d.oy = big.oy;
+        d.oxi = big.oxi;
+        d.oyi = big.oyi;
+        for (int g = 0; g < w * h; g++) {
+            if (!strip[g] || owner[g] != torn) continue;
+            int lx = Math.floorMod(g % w - big.oxi, w), ly = Math.floorMod(g / w - big.oyi, h); // same frame offset, so same local cell in d
+            d.set(lx, ly, big.get(lx, ly));
+            big.set(lx, ly, 0);
+            owner[g] = dead;
+        }
+        if (rough != null) { // a ragged tear where it crosses continent, as format 102's rifts
+            int split = dead, whole = torn;
+            for (int g : raggedEdges(owner, k -> owner[k] == whole || owner[k] == split)) {
+                int lx = Math.floorMod(g % w - big.oxi, w), ly = Math.floorMod(g / w - big.oyi, h);
+                Plate to = owner[g] == split ? d : big, from = to == d ? big : d;
+                to.set(lx, ly, from.get(lx, ly));
+                from.set(lx, ly, 0);
+            }
+        }
+        double ux = sx / count - rx / rest, uy = sy / count - ry / rest, len = Math.max(1e-6, Math.hypot(ux, uy)); // from the rest toward the strip: toward the trench
+        setVelocity(d, big.vx + ux / len * SPLIT_SPEED, big.vy + uy / len * SPLIT_SPEED);
+        d.born = stepCount;
+        d.parent = torn;
+        d.pullX = (float) (ux / len);
+        d.pullY = (float) (uy / len);
+        lastSplit = stepCount;
+    }
+
     /** x in 0..2w-1 back into 0..w-1. */
     private int wrapX(int x) {
         return x >= w ? x - w : x;
@@ -993,13 +1093,14 @@ public final class Planet {
     private void diffuseRow(int y, float[] next) {
         for (int x = 0; x < w; x++) {
             int g = x + y * w, p = owner[g];
-            float sum = 0;
+            float sum = 0, thick = 0;
             boolean land = height[g] > SEA_LEVEL;
             for (int k = 0; k < 4; k++) {
                 int n = k == 0 ? (x == 0 ? w - 1 : x - 1) + y * w : k == 1 ? (x == w - 1 ? 0 : x + 1) + y * w : k == 2 ? (y > 0 ? g - w : -1) : y < h - 1 ? g + w : -1;
                 if (n >= 0 && owner[n] == p && (height[n] > SEA_LEVEL) == land) sum += height[n] - height[g];
+                if (n >= 0 && owner[n] == p && land && height[n] > SEA_LEVEL) thick += Math.max(0, height[n] - THICK) - Math.max(0, height[g] - THICK);
             }
-            next[g] = height[g] + DIFFUSION * sum;
+            next[g] = Math.min(MAX_CRUST, height[g] + DIFFUSION * sum + THICK_FLOW * thick);
             setCrust(plates[p], x, y, next[g]);
         }
     }

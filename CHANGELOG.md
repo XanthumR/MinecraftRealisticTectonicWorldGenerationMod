@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- **Taller ridge mountains**: where continents are still colliding, the range keeps rising while rivers cut it, and the
+  thickened crust spreads a few cells inland, so young ranges stand 3-7.7 km high with snow and glaciers instead of
+  wearing down to ~1.2 km hills; old ranges still wear down. Valley relief is capped so tall ranges read as massifs
+  with ridges, not spires (new worlds only).
+- **Deeper valleys**: on Small and Medium planets valleys cut 1.5x as deep into mountain belts and the ridges stand
+  1.5x as high over them, so ranges read as peaks and branching valleys instead of rounded swells (new worlds only).
+- **Back-arc seas** (like the Sea of Japan): where the crust behind an ocean trench is stretched hard, the volcanic arc
+  tears off its continent and drifts out toward the trench, and new sea floor opens behind it, leaving an island chain
+  with a young sea between it and the mainland (new worlds only).
 - **Land no longer shrinks as the planet ages**: colliding continents used to eat each other for hundreds of steps
   (30% land to 17% over 1200 steps). Volcanic arcs behind ocean trenches now build new crust that rises as island
   chains (Japan, the Aleutians) and welds onto continents in collisions, and colliding continents brake much harder:

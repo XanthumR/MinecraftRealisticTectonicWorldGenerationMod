@@ -68,6 +68,8 @@ public final class Terrain {
                                                       // costs 4-16 times Medium's ~6 s and 330 MB, and a coarser one reads as smooth swells (Huge on 16 blocks: no better than the massifs)
     static final float VALLEY_ROUGH = 4;              // format 100: blocks of unevenness the water's routing sees (not the land's): drainage wanders
     static final float VALLEY_HIGH = 20;              // format 100: blocks of that height before the land counts as high (the massifs' own start)
+    static final float VALLEY_DEPTH = 1.5f;          // format 111: times the relief valleys get within a cell: real belts have 400-1,500 m within 10 km, the game had 117-196 m (2x stood out too much, 3x read as needles)
+    static final float VALLEY_CAP = 60;              // format 112: blocks of valley relief within a cell at most: format 112's belts rose to 3-7.7 km and hit 180, spires at the 80x height stretch
     static final float BEACH_SLOPE = 60;              // blocks the beach rises per unit of land mask; from format 37 divided by the beach's width factor
     static final float RIPARIAN_MM = 700, RIPARIAN_FLOW = 2000, RIPARIAN_REACH = 48; // format 38: rain-equivalent a big river's groundwater gives its banks; flow that counts as big; blocks its green strip reaches
     static final float FROZEN_MOST = 0.5f; // format 45: cos(60°), the shift that makes a 0 °C test mean frozen two-thirds of the year
@@ -375,6 +377,8 @@ public final class Terrain {
     private final boolean slopeCraters;   // a crater cuts at most CRATER_MAX_CUT depths below the land: on a slope a tilted bowl, not a shaft: format 105
     private final boolean domes;          // dome mountains: the rock beds bowed over each, worn into hogback rings round its core: format 107
     private final boolean tiltBlocks;     // a tilted fault block (the Sierra Nevada) where the crust behind a trench starts to stretch: format 108
+    private final float valleyDepth;      // times the massifs' relief the valleys may cut and the ridges stand: 1, and VALLEY_DEPTH from format 111
+    private final float valleyCap;        // blocks of that relief at most: none, and VALLEY_CAP from format 112
     private final Valleys valleyGrid;     // format 100: the massifs as the water cut them; null before
     private final float[] placer;         // format 92: per cell, share of a river bed's blocks that are gold washed from a deposit upstream
     private volatile byte[] depositCells; // format 92: per cell, the Deposits.Kind ordinal it holds or -1, for the map and /tectonic (lazy)
@@ -548,6 +552,8 @@ public final class Terrain {
         slopeCraters = data.format >= 105;
         domes = data.format >= 107;
         tiltBlocks = data.format >= 108 && grabens;
+        valleyDepth = data.format >= 111 ? VALLEY_DEPTH : 1;
+        valleyCap = data.format >= 112 ? VALLEY_CAP : Float.MAX_VALUE;
         coneStyle = blownFlanks ? Volcano.BLOWN : smoothCones ? Volcano.SMOOTH_SCARS : variedVolcanoes ? Volcano.VARIED : Volcano.ROUND;
         snowLine = data.format >= 18;
         iceCapBelow = data.format >= 8 ? Biome.ICE_CAP_BELOW : Biome.OLD_ICE_CAP_BELOW;
@@ -2826,7 +2832,7 @@ public final class Terrain {
         out[0] = natural;
         if (high <= VALLEY_HIGH) { out[1] = out[3] = 0; out[2] = 2; return; }
         float relief = Math.min(talus ? TALUS_MASSIF_RELIEF : MASSIF_RELIEF, MASSIF_SHARE * high) * smoothstep((high - 20) / 60);
-        out[1] = relief;
+        out[1] = Math.min(valleyCap, relief * valleyDepth); // both the ridges' slope over their valleys and how far either may stand off the cell's mean
         boolean wet = !Float.isNaN(lakeY[cell((int) Math.round(u), (int) Math.round(v))]); // lakes hold their water's level; rivers are cut later, along the valleys
         out[2] = wet ? 1 : 0;
         out[3] = VALLEY_ROUGH * (fine(x, z, 64, 130) + 0.5f * fine(x, z, 16, 131));
