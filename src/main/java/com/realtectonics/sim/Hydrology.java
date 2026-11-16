@@ -27,6 +27,12 @@ public final class Hydrology {
     static final float RIFT_SINK = 0.7f;        // share of its height a rift floor drops between the faults (East Africa: 1500 m to ~500)
     static final float RIFT_SHOULDER = 300, RIFT_KEEL = 5; // metres the shoulders rise; the floor stays at least this far above the sea
     static final float FAULT_GOUGE = 8, FAULT_FULL_SLIP = 0.4f; // times faster crushed rock along a strike-slip fault erodes; slip (cells/step) for all of it
+    static final float DOMES = 4;               // format 107: dome mountains on a Medium planet's worth of land
+    static final int DOME_CALM = 8;             // cells a dome keeps from the coast, trenches, collision belts and rifts: deep in the craton
+    static final float DOME_LOWLAND = 1000;     // metres: only on plains and low plateaus, not on a range
+    static final float DOME_MIN = 4, DOME_MAX = 7;    // cells: half its length (the Black Hills ~100 km, the Adirondacks ~130, the Ozarks ~200; 1.2 km a block at Medium)
+    static final int DOME_SPACING = 20;         // cells between dome middles
+    static final float DOME_METRES = 2500;      // how far a typical dome bowed the beds up at its middle (the Black Hills ~2.5 km; erosion takes about half back off the top)
     static final float VOLCANO_YOUTH = 0.33f;   // share of the erosion the volcanoes stand through: they are young beside the land
     static final float CALDERA_SINK = 0.4f;     // of a collapsing volcano's height its summit sinks by, at most Volcano.CALDERA_DEPTH
     static final float CONE_BLEND = 400;        // metres over which two overlapping volcanoes' slopes round into each other
@@ -70,6 +76,7 @@ public final class Hydrology {
     public final int[] receiver;    // next cell downstream, -1 for sea and outlets
     public final float[] flow;      // rain from upstream, in cells x metres per year
     public final List<Volcano> volcanoes = new ArrayList<>(); // with their bases, as built into this landscape
+    public final List<Dome> domes = new ArrayList<>(); // format 107: dome mountains bowed up in calm continent, before the erosion
     public final byte[] ice;        // 0, GLACIATED or FJORD: what the Ice Age glaciers did here
     private final boolean[] lake;
     private final float[] lakeLevel; // lake surface where lake is true: the spill level, or lower in a shrunken lake
@@ -153,6 +160,7 @@ public final class Hydrology {
             float m = Planet.metres(elevation[g]);
             elevation[g] = Planet.fromMetres(Math.max(RIFT_KEEL, m * (1 - RIFT_SINK * down) + RIFT_SHOULDER * up));
         }
+        domes(planet, seed, shore, floor);
         int[] offshore = distanceFrom(g -> elevation[g] >= 0), trench = distanceFrom(g -> planet.subduction[g] > Planet.ARC_ACTIVITY);
         float[] breadth = Noise.fbm(w, h, planet.scaleWidth / 32, 4, new Random(seed * 13 + 5)), shelf = new float[n];
         for (int g = 0; g < n; g++) {
@@ -550,6 +558,38 @@ public final class Hydrology {
             }
             elevation[g] = Math.max(0.001f, before[g] + CREEP * sum);
         }
+    }
+
+    /**
+     * Format 107: dome mountains. Far inside a continent, away from trenches, collisions, rifts and the coast, the
+     * crust bowed up into an oval dome (the Black Hills: 200 km by 100, ~1,200 m over the plains). Raised before the
+     * erosion, so rivers drain it outward and cut it the way they cut everything else; Terrain bows the rock beds over
+     * it, which wear into rings of hogbacks round a granite core.
+     */
+    private void domes(Planet planet, long seed, int[] shore, float[] rift) {
+        Random rnd = new Random(seed * 41 + 9);
+        int[] trench = distanceFrom(g -> planet.subduction[g] > Planet.ARC_ACTIVITY), belt = distanceFrom(g -> planet.collision[g] > 1), rifted = distanceFrom(g -> rift[g] > 0);
+        List<Integer> sites = new ArrayList<>();
+        for (int g = 0; g < w * h; g++)
+            if (shore[g] > DOME_CALM && trench[g] > DOME_CALM && belt[g] > DOME_CALM && rifted[g] > DOME_CALM && Planet.metres(elevation[g]) < DOME_LOWLAND) sites.add(g);
+        java.util.Collections.shuffle(sites, rnd);
+        int want = Math.round(DOMES * w * h / (1024 * 512f));
+        for (int g : sites) {
+            if (domes.size() >= want) break;
+            boolean crowded = false;
+            for (Dome d : domes) { double dx = d.u() - g % w; dx -= w * Math.rint(dx / w); crowded |= Math.hypot(dx, d.v() - g / w) < DOME_SPACING; }
+            if (crowded) continue;
+            float a = DOME_MIN + (DOME_MAX - DOME_MIN) * rnd.nextFloat();
+            domes.add(new Dome(g % w + 0.5f, g / w + 0.5f, a, a * (0.5f + 0.35f * rnd.nextFloat()), (float) (Math.PI * rnd.nextFloat()), DOME_METRES * (0.7f + 0.6f * rnd.nextFloat())));
+        }
+        for (Dome d : domes)
+            for (int dy = (int) -Math.ceil(d.a()); dy <= Math.ceil(d.a()); dy++)
+                for (int dx = (int) -Math.ceil(d.a()); dx <= Math.ceil(d.a()); dx++) {
+                    int y = (int) d.v() + dy, x = Math.floorMod((int) d.u() + dx, w);
+                    if (y < 0 || y >= h) continue;
+                    float lift = d.lift(x + 0.5, y + 0.5, w);
+                    if (lift > 0) elevation[x + y * w] = Planet.fromMetres(Planet.metres(elevation[x + y * w]) + d.metres() * lift);
+                }
     }
 
     /** Implicit stream power erosion, receivers before donors. Inside lakes it averages up: sediment infill. */

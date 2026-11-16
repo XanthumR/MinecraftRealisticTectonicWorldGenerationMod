@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- **Dome mountains**: a few oval domes deep inside continents, far from any plate edge (like the Black Hills or
+  the Adirondacks): a forested granite core drained by radial valleys, ringed by hogback ridges whose steep faces look
+  in toward it (new worlds only).
 - **Hotspot volcanoes spaced out**: a plate drifting slowly over a hotspot builds one bigger shield volcano instead
   of a heap of cones 30-60 blocks apart; the next one rises at least 128 blocks on (new worlds only).
 - **No crater shafts on slopes**: a volcano on a steep hillside keeps a crater open downhill instead of a round
