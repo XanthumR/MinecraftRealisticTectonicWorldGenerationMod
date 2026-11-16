@@ -67,7 +67,7 @@ public final class TectonicChunkGenerator extends NoiseBasedChunkGenerator {
             Codec.INT.validate(z -> z >= 1 && z <= 8 && Integer.bitCount(z) == 1 ? DataResult.success(z) : DataResult.error(() -> "World scale must be 1, 2, 4 or 8: " + z))
                     .optionalFieldOf("zoom", 1).forGetter(PlanetSettings::zoom), // worlds from before world scale stay at 1
             Codec.floatRange(0, 2).optionalFieldOf("volcanoes", 1f).forGetter(PlanetSettings::volcanoes),
-            Codec.intRange(50, 1000).optionalFieldOf("steps", 300).forGetter(PlanetSettings::steps),
+            Codec.intRange(50, 1200).optionalFieldOf("steps", 300).forGetter(PlanetSettings::steps),
             Codec.floatRange(0.25f, 8).optionalFieldOf("river_width", 1f).forGetter(PlanetSettings::riverWidth), // older worlds keep their rivers
             Codec.BOOL.optionalFieldOf("earth", false).forGetter(PlanetSettings::earth),
             Codec.BOOL.optionalFieldOf("medium_continents", false).forGetter(PlanetSettings::mediumContinents),

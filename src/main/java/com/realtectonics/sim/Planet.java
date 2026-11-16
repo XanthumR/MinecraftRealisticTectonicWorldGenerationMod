@@ -24,7 +24,7 @@ public final class Planet {
     static final float SUBDUCTION_UPLIFT = 0.15f; // volcanic arcs (Andes, Japan)
     static final float COLLISION_UPLIFT = 1.0f;   // continents never sink: all mass folds up (Himalaya)
     static final float DIFFUSION = 0.04f;         // hillslope creep; rivers do the rest, interleaved with the plates
-    static final float COLLISION_DRAG = 0.002f;   // per overlapping continent cell: a 50-cell front stops a plate in ~30 steps
+    static final float COLLISION_DRAG = 0.03f;    // per overlapping continent cell: a 50-cell front stops a plate in a few steps (format 109; 0.002 before, ~30 steps, and colliding continents ate each other: 30% land to 17% in 1200 steps)
     static final float OLD_OCEAN = OCEAN + 0.2f;  // ocean floor this cold and dense sinks at trenches
     static final float SLAB_PULL = 0.00025f;      // per trench cell; terminal speed = pull * trench length / drag
     static final float MANTLE_DRAG = 0.05f;       // without trenches pulling, a plate stops in ~60 steps
@@ -35,6 +35,8 @@ public final class Planet {
     static final float ARC_ACTIVITY = 5;          // recent subduction needed for an arc behind it
     public static final float RIDGE_ACTIVITY = 2; // recent spreading that makes a cell a ridge axis (a gap opens every 1/speed steps)
     static final int ARC_MIN = 3, ARC_MAX = 6;    // cells from trench to volcanic arc (~150-250 km, as on Earth)
+    static final float ARC_LAND = 0.5f;           // format 109: share of an arc's length that rises as islands; the rest stays straits between them
+    static final float ARC_GROWTH = 0.1f;         // format 109: crust units a step the arc behind an active trench adds to thin crust, peaking mid-arc
     static final int ARC_SPACING = 10;            // cells between arc volcanoes; Earth's are closer, but this is a game
     static final int HOTSPOT_PERIOD = 20;         // steps between eruptions of a hotspot
     static final int HOTSPOT_GAP = 4;             // format 106: cells (128 blocks) a plate must carry a hotspot volcano off before the next one is born
@@ -82,6 +84,7 @@ public final class Planet {
     private final boolean[] gap;     // cells this step's new crust fills
     private final Random rnd, volcanic; // separate streams, so volcanoes don't reshuffle the continents
     private float[] rough;              // format 102: zero-mean rough noise (coast persistence) that rifts through continents follow; null on Earth
+    private float[] arcIslands;         // format 109: 0-1 per plate-local cell, where along an arc the crust grows: islands and the straits between; null on Earth
     final long seed;
     private final int[] hotspots;       // fixed in the mantle; plates drift over them
     private final float volcanism;      // how many volcanoes, relative to normal
@@ -176,6 +179,11 @@ public final class Planet {
         float mean = 0;
         for (float v : rough) mean += v / rough.length;
         for (int g = 0; g < rough.length; g++) rough[g] -= mean;
+        arcIslands = Noise.fbm(w, h, Math.max(8, scaleWidth / 64), 4, new Random(seed * 53 + 5)); // own stream too; islands of a few cells, no specks
+        float[] sorted = arcIslands.clone();
+        Arrays.sort(sorted);
+        float from = sorted[(int) (sorted.length * (1 - ARC_LAND))], to = sorted[(int) (sorted.length * Math.min(0.99, 1 - ARC_LAND + 0.1))];
+        for (int g = 0; g < arcIslands.length; g++) arcIslands[g] = Math.clamp((arcIslands[g] - from) / (to - from), 0, 1);
         owner = growPlates(plateCount, rnd);
         raggedEdges(owner, g -> true);
         plates = new Plate[plateCount];
@@ -511,6 +519,7 @@ public final class Planet {
         for (int o : owner) area[o]++;
         IntStream.range(0, h).parallel().forEach(y -> compositeRow(y, collisions, area));
         spreadEvenly();
+        growArcs();
         // Continents are too buoyant to subduct, so colliding plates grind to a halt instead of eating each other.
         for (int p = 0; p < plates.length; p++) {
             float drag = 1 / (1 + COLLISION_DRAG * collisions.get(p));
@@ -953,6 +962,25 @@ public final class Planet {
             setCrust(plates[from], x, y, 0);
             setCrust(plates[to], x, y, height[g]);
             owner[g] = to;
+        }
+    }
+
+    /**
+     * Format 109: arcs make new crust. Behind an active trench the diving slab's water melts the mantle, and the melt
+     * thickens the overriding plate along the volcanic arc; where that plate is ocean the arc rises out of the sea as
+     * a chain of islands (Japan, the Aleutians), light enough to count as continent from then on: it no longer dives,
+     * and collisions weld it onto the continents as terranes. That is how Earth keeps its land while collisions
+     * consume it; without it a 1200-step planet went from 30% land to 17%. Thick crust is left to the arc uplift.
+     */
+    private void growArcs() {
+        int[] dist = trenchDistance(ARC_MAX);
+        for (int g = 0; g < w * h; g++) {
+            if (dist[g] < ARC_MIN || dist[g] > ARC_MAX || height[g] >= CONTINENT) continue;
+            Plate p = plates[owner[g]];
+            float peak = dist[g] > ARC_MIN && dist[g] < ARC_MAX ? 1 : 0.6f; // the arc's middle rows, so islands rise a few cells wide, not a one-cell thread
+            if (arcIslands != null) peak *= arcIslands[Math.floorMod(g % w - p.oxi, w) + Math.floorMod(g / w - p.oyi, h) * w]; // fixed to the plate, so an island keeps growing where it began
+            height[g] = Math.min(CONTINENT, height[g] + ARC_GROWTH * peak);
+            setCrust(p, g % w, g / w, height[g]);
         }
     }
 
