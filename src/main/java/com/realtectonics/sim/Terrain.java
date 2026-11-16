@@ -93,6 +93,12 @@ public final class Terrain {
     static final float ICE_FRONT = 4;        // blocks: height of a glacier's calving front above a lake (format 31)
     static final float FAULT_SCARP = 10, FAULT_SCARP_WIDTH = 2; // blocks a fast fault's scarp stands (150 m, a pressure ridge); unzoomed blocks its face spans
     static final float HORST = 16;          // format 75: blocks a fault block of fully stretched crust stands over the basins beside it (240 m)
+    static final float TILT_CREST = 6.5f;   // format 108: cells from the trench where a tilted block's crest stands over its scarp: where the stretching sets in (Planet.BACKARC_FROM)
+    static final float TILT_BACK = 3;       // cells its back slope runs down toward the trench (the Sierra Nevada's ~100 km is ~2.5 at Medium)
+    static final float TILT_HEIGHT = 80;    // blocks its crest stands over the land where the crust behind is fully stretched (1,200 m)
+    static final float TILT_SCARP = 14;     // unzoomed blocks its scarp drops over: the one great fault's face
+    static final float TILT_AHEAD = 2.5f;   // cells on from the crest where the stretching that tilts it is read: the basins it faces
+    static final float TILT_WANDER = 0.6f;  // cells the fault's trace bends either way of a smooth line
     static final float HORST_SPACING = 192; // format 75: unzoomed blocks from one fault block to the next across the trench's strike
     static final float TALL_HORST = 40;     // format 76: blocks a fault block stands where the crust is stretched the most (600 m); HORST where it is barely
     static final float HORST_HALF = 0.2f, SCARP_BLOCKS = 15; // format 76: share of the fault spacing the flat top spans either side of its middle; unzoomed blocks the stepped scarp beyond it spans
@@ -368,6 +374,7 @@ public final class Terrain {
     private final boolean riverHeads;     // rivers rise narrow, widening down their first reach, with ragged edges and banks there: format 104
     private final boolean slopeCraters;   // a crater cuts at most CRATER_MAX_CUT depths below the land: on a slope a tilted bowl, not a shaft: format 105
     private final boolean domes;          // dome mountains: the rock beds bowed over each, worn into hogback rings round its core: format 107
+    private final boolean tiltBlocks;     // a tilted fault block (the Sierra Nevada) where the crust behind a trench starts to stretch: format 108
     private final Valleys valleyGrid;     // format 100: the massifs as the water cut them; null before
     private final float[] placer;         // format 92: per cell, share of a river bed's blocks that are gold washed from a deposit upstream
     private volatile byte[] depositCells; // format 92: per cell, the Deposits.Kind ordinal it holds or -1, for the map and /tectonic (lazy)
@@ -540,6 +547,7 @@ public final class Terrain {
         riverHeads = data.format >= 104;
         slopeCraters = data.format >= 105;
         domes = data.format >= 107;
+        tiltBlocks = data.format >= 108 && grabens;
         coneStyle = blownFlanks ? Volcano.BLOWN : smoothCones ? Volcano.SMOOTH_SCARS : variedVolcanoes ? Volcano.VARIED : Volcano.ROUND;
         snowLine = data.format >= 18;
         iceCapBelow = data.format >= 8 ? Biome.ICE_CAP_BELOW : Biome.OLD_ICE_CAP_BELOW;
@@ -1589,6 +1597,7 @@ public final class Terrain {
         if (gullies && !simGullies && natural > SEA_Y + 20) natural += gullies(x, z, u, v, natural - SEA_Y) * (1 - ridgeline * ridgeline * ridgeline); // none on the crests; from 33 water cuts them (relaxTile)
         if (faults) natural += faultScarp(x, z, u, v, natural);
         if (faultBlocks) natural += grabens ? grabens(x, z, u, v, natural) : faultBlocks(x, z, u, v, natural);
+        if (tiltBlocks) natural += tiltBlock(x, z, u, v, natural);
         if (tablelands) natural = tableland(x, z, u, v, natural, keep[0]);
         natural = softCeiling(natural);
         // From format 22 volcano summits are sharpened here, as part of the land, so rivers cut through them later
@@ -1801,6 +1810,26 @@ public final class Terrain {
         float dip = SEA_Y + tableStep * fine(x, z, 2048, 81), bed = (natural - dip) / tableStep, k = (float) Math.floor(bed);
         float stair = dip + (k + smoothstep((bed - k) / TABLE_RISER)) * tableStep;
         return natural + share * Math.clamp(stair - natural, 0, tableStep);
+    }
+
+    /**
+     * Format 108: a tilted fault block (the Sierra Nevada, the Tetons). Where the crust behind a trench starts to
+     * stretch, the unstretched block on the trench side breaks off along one great fault and tilts: its crest stands
+     * over a steep scarp facing the stretched basins, its back slopes down toward the trench over TILT_BACK cells, as
+     * tall as the crust beyond is stretched. Blocks run a few hundred blocks along the trench and die out at their ends.
+     * Only raises the ground (rivers keep their channels and saw gorges through it), and not into lakes or the sea.
+     */
+    private float tiltBlock(double x, double z, double u, double v, float natural) {
+        float dist = cubic(arcDist, u, v) + TILT_WANDER * fine(x, z, 256, 83), back = (dist - (TILT_CREST - TILT_BACK)) / TILT_BACK, scarp = TILT_SCARP / BLOCKS_PER_CELL; // the fault's trace wanders
+        if (back <= 0 || dist >= TILT_CREST + scarp || natural < SEA_Y + 2) return 0;
+        float e = 0.5f, du = cubic(arcDist, u + e, v) - cubic(arcDist, u - e, v), dv = cubic(arcDist, u, v + e) - cubic(arcDist, u, v - e);
+        float len = (float) Math.max(hyp(du, dv), 1e-6), ahead = TILT_CREST + TILT_AHEAD - dist; // on away from the trench, past the crest
+        float stretch = cubic(data.backArc, u + ahead * du / len, v + ahead * dv / len);
+        float along = smoothstep((fine(x, z, 1024, 82) + 0.1f) / 0.3f); // blocks with ends, not one wall the length of the trench
+        float onLand = smoothstep((natural - SEA_Y - 2) / 8) * (1 - smoothstep(cubic(lakes, u, v) / 0.3f));
+        float up = Math.min(back, 1) * (1 - smoothstep((dist - TILT_CREST) / scarp)); // up the back, then over the scarp
+        float peaks = 0.65f + 0.7f * (fine(x, z, 128, 84) + 0.5f * fine(x, z, 64, 85)); // summits and passes along the crest
+        return TILT_HEIGHT * Math.min(1, 2 * stretch) * up * along * onLand * Math.max(0.3f, peaks);
     }
 
     /** Format 76: blocks the fault block at this column was lifted (0 in a basin); its rock layers go up as far. */

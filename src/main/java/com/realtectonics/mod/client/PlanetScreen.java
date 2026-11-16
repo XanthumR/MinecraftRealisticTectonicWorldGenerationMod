@@ -100,7 +100,7 @@ public final class PlanetScreen extends Screen {
                 .create(cx - 155, y, 150, 20, Component.literal("World scale"), (button, z) -> settings = settings.withZoom(z)));
         addRenderableWidget(new Slider(cx + 5, y, "Volcanoes", 0, 2, settings.volcanoes(), true, true, v -> settings = settings.withVolcanoes((float) v)));
         y += 24;
-        addRenderableWidget(new Slider(cx - 155, y, "Steps", 100, 600, settings.steps(), false, true, v -> settings = settings.withSteps((int) v)));
+        addRenderableWidget(new Slider(cx - 155, y, "Steps", 100, 1200, settings.steps(), false, true, v -> settings = settings.withSteps((int) v)));
 
         addRenderableWidget(new Slider(cx + 5, y, "Rivers", 0.5, 4, settings.riverWidth(), true, false, v -> settings = settings.withRiverWidth((float) v)));
         y += 24;

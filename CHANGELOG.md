@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- **Land no longer shrinks as the planet ages**: colliding continents used to eat each other for hundreds of steps
+  (30% land to 17% over 1200 steps). Volcanic arcs behind ocean trenches now build new crust that rises as island
+  chains (Japan, the Aleutians) and welds onto continents in collisions, and colliding continents brake much harder:
+  ~31% land at the default 300 steps, ~27% at 1200 (new worlds only).
+- **Steps slider up to 1200** (was 600), for older, more worn planets.
+- **Tilted fault blocks** (like the Sierra Nevada): where the crust behind a trench starts to stretch, a block tilts up
+  with a long back slope toward the trench and a steep scarp over the basins (new worlds only).
 - **Dome mountains**: a few oval domes deep inside continents, far from any plate edge (like the Black Hills or
   the Adirondacks): a forested granite core drained by radial valleys, ringed by hogback ridges whose steep faces look
   in toward it (new worlds only).
