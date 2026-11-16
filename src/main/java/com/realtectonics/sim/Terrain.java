@@ -102,6 +102,10 @@ public final class Terrain {
     static final int BASE_REACH = 4; // format 80: cells round a spot on calm rock whose lowest ground is the base level its valleys cut down to
     static final float CALM_HILLS = 0.6f; // format 80: share of its height a calm plain still rolls with however shallow its valleys, low swells and old worn hills
     static final float TABLE_LOW = 40, TABLE_HIGH = 70; // format 77: blocks above the sea where sedimentary land starts to stand as tableland, and fully
+    static final float DOME_BEDS = 0.5f;    // format 107: dome lift where its beds are worn through to the granite core (Geology.DOME_CORE); hogbacks ring it outside
+    static final float HOGBACK_STEP = 64;   // blocks between the hard beds that stand as hogbacks round a dome: two or three rings show, not a dozen
+    static final float HOGBACK_HEIGHT = 0.35f; // share of HOGBACK_STEP a hogback's crest stands over the valley inside it (~22 blocks, ~330 m)
+    static final float HOGBACK_FACE = 0.25f;   // share of a bed its steep inner face takes; the rest is the long dip slope outward
     static final float FJORD_HALF = 0.7f;   // format 78: a fjord's trough this share of a glacial trough's width (narrow water under tall walls)
     static final float FJORD_POWER = 3;     // format 78: its U shape: higher is a flatter floor under steeper walls
     static final float FJORD_DEPTH = 24, FJORD_DEPTH_MAX = 44; // format 78: blocks of water over a fjord's floor, more for bigger glaciers (Sognefjord 1,300 m)
@@ -363,6 +367,7 @@ public final class Terrain {
     private final boolean lakeMouths;     // a river entering a lake runs on past its first lake cell's centre until it meets the water: format 103
     private final boolean riverHeads;     // rivers rise narrow, widening down their first reach, with ragged edges and banks there: format 104
     private final boolean slopeCraters;   // a crater cuts at most CRATER_MAX_CUT depths below the land: on a slope a tilted bowl, not a shaft: format 105
+    private final boolean domes;          // dome mountains: the rock beds bowed over each, worn into hogback rings round its core: format 107
     private final Valleys valleyGrid;     // format 100: the massifs as the water cut them; null before
     private final float[] placer;         // format 92: per cell, share of a river bed's blocks that are gold washed from a deposit upstream
     private volatile byte[] depositCells; // format 92: per cell, the Deposits.Kind ordinal it holds or -1, for the map and /tectonic (lazy)
@@ -534,6 +539,7 @@ public final class Terrain {
         lakeMouths = data.format >= 103;
         riverHeads = data.format >= 104;
         slopeCraters = data.format >= 105;
+        domes = data.format >= 107;
         coneStyle = blownFlanks ? Volcano.BLOWN : smoothCones ? Volcano.SMOOTH_SCARS : variedVolcanoes ? Volcano.VARIED : Volcano.ROUND;
         snowLine = data.format >= 18;
         iceCapBelow = data.format >= 8 ? Biome.ICE_CAP_BELOW : Biome.OLD_ICE_CAP_BELOW;
@@ -1774,6 +1780,22 @@ public final class Terrain {
      */
     private float tableland(double x, double z, double u, double v, float natural, float smooth) {
         float share = cubic(sediment, u, v) * smoothstep((smooth - SEA_Y - TABLE_LOW) / (TABLE_HIGH - TABLE_LOW));
+        // Format 107: over a dome the beds are bowed up by all it rose, far more than the worn land kept, so the land
+        // cuts across them: each hard bed stands as a ridge dipping away from the core (a hogback), the soft beds
+        // between as valleys, in rings round the granite core where the beds are worn through.
+        float bowed = 0, ring = 0;
+        for (Dome d : domes ? data.domes : List.<Dome>of()) {
+            float lift = d.lift(u + 0.5, v + 0.5, w);
+            if (lift <= 0) continue;
+            bowed += d.metres() * lift / landMetresPerBlock;
+            ring = Math.max(ring, smoothstep(lift / 0.1f) * (1 - smoothstep((lift - DOME_BEDS + 0.1f) / 0.1f)));
+        }
+        if (ring > 0) { // the next bed's top above the ground: 0 just outside an outcrop, a whole step just inside the next
+            float base = SEA_Y + bowed, bed = (natural - base) / HOGBACK_STEP, k = (float) Math.floor(bed);
+            float top = base + (k + smoothstep((bed - k) / HOGBACK_FACE)) * HOGBACK_STEP;
+            natural += ring * HOGBACK_HEIGHT * Math.clamp(top - natural, 0, HOGBACK_STEP);
+        }
+        share *= 1 - ring; // bowed beds, not flat benches
         if (share <= 0.01f) return natural;
         share *= (1 - smoothstep(cubic(lakes, u, v) / 0.3f)) * (1 - smoothstep((natural - smooth - tableStep / 2) / (tableStep / 2)));
         float dip = SEA_Y + tableStep * fine(x, z, 2048, 81), bed = (natural - dip) / tableStep, k = (float) Math.floor(bed);

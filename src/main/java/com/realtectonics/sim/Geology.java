@@ -9,10 +9,11 @@ final class Geology {
     static final float BASIN_METRES = 600;     // sediment collects in lowland river valleys, deltas and lake basins
     static final float BASIN_WETNESS = 0.15f;  // blurred river-and-lake share that makes a lowland a basin
     static final float SHIELD_SHARE = 0.45f;   // of stable continent, roughly how much is exposed granite shield
+    static final float DOME_CORE = 0.5f;       // format 107: dome lift above which erosion has stripped the beds off its granite core
 
     private Geology() {}
 
-    static byte[] provinces(Planet planet, float[] metres, float[] flow, float[] lakeMetres) {
+    static byte[] provinces(Planet planet, float[] metres, float[] flow, float[] lakeMetres, java.util.List<Dome> domes) {
         int w = planet.w, h = planet.h;
         float[] belts = planet.collision.clone(); // collisions happen on a line; the deformed belt is wider
         for (int pass = 0; pass < 3; pass++) blur(belts, w, h);
@@ -34,6 +35,8 @@ final class Geology {
             else if (trench[g] <= ARC_REACH) r = Rock.ARC;
             else if (metres[g] < BASIN_METRES && wet[g] > BASIN_WETNESS) r = Rock.BASIN;
             else r = cover[g] + (metres[g] - 500) / 3000 > shieldAbove ? Rock.CRATON : Rock.BASIN;
+            for (Dome d : r == Rock.OCEANIC ? java.util.List.<Dome>of() : domes) // erosion stripped the beds off the core down to granite
+                if (d.lift(g % w + 0.5, g / w + 0.5, w) > DOME_CORE) r = Rock.CRATON;
             rock[g] = (byte) r.ordinal();
         }
         return rock;
