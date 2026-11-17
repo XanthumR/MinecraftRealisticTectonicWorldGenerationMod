@@ -2,7 +2,9 @@
 
 ## Unreleased
 
-- **Natural maar shapes**: explosion craters are drawn out and scalloped, as overlapping blasts leave them, with frayed
+- **Caldera rims**: no more thin walls of spires round a caldera; the rim is a crest over the caldera's cliff with the
+  volcano's flank falling away outside (new worlds only).
+- **Natural maar and crater shapes**: maars and volcanoes' summit craters are drawn out and scalloped, with frayed
   edges, instead of perfect circles (new worlds only).
 - **Taller ridge mountains**: where continents are still colliding, the range keeps rising while rivers cut it, and the
   thickened crust spreads a few cells inland, so young ranges stand 3-7.7 km high with snow and glaciers instead of
