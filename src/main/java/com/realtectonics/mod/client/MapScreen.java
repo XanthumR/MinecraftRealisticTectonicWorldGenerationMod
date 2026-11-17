@@ -29,7 +29,7 @@ import org.lwjgl.glfw.GLFW;
 public final class MapScreen extends Screen {
     static final KeyMapping KEY = new KeyMapping("key.realtectonics.map", InputConstants.Type.KEYSYM, GLFW.GLFW_KEY_M, "key.categories.misc");
     private static final int MAX_ZOOM = 16;
-    private static final String[] LAYERS = {"biome", "geology", "plates", "rain", "temperature", "ore deposits"};
+    private static final String[] LAYERS = {"biome", "geology", "plates", "rain", "temperature", "ore deposits", "height"};
     private static final double REPLAY_SECONDS = 8; // the whole run, start to end
     private static final int ARROW_PIXELS = 40;    // arrow length of a plate moving one cell a step
 
@@ -119,8 +119,7 @@ public final class MapScreen extends Screen {
         }
         if (keyCode == GLFW.GLFW_KEY_G) {
             Terrain t = RealTectonics.terrainOrNull();
-            do layer = (layer + 1) % LAYERS.length;
-            while (layer == 2 && t != null && t.data.format < 64 || layer == 5 && t != null && !t.deposits); // no plates saved in older worlds, no deposits before format 92
+            layer = next(layer, t);
             return true;
         }
         if (keyCode == GLFW.GLFW_KEY_C) {
@@ -193,6 +192,7 @@ public final class MapScreen extends Screen {
                 case 2 -> MapLayers.plates(t.data);
                 case 3 -> MapLayers.rain(t.data);
                 case 4 -> MapLayers.temperature(t.data);
+                case 6 -> MapLayers.height(t.data);
                 case 5 -> t.depositCells() == null ? t.mapColors(false) : t.depositColors(); // format 92
                 default -> t.mapColors(layer == 1);
             };
@@ -254,12 +254,13 @@ public final class MapScreen extends Screen {
             case 2 -> "plate " + (t.data.plate[cell] & 255);
             case 3 -> Math.round(t.data.precipitation[cell]) + " mm/yr";
             case 4 -> String.format("%.1f °C", t.data.temperature[cell]);
+            case 6 -> { int y = t.column(bx, bz).ground(); yield String.format("y %d (%,.0f m)", y, t.toMetres(y)); }
             case 5 -> t.depositCells() == null || t.depositCells()[cell] < 0 ? "no deposit" : com.realtectonics.sim.Deposits.Kind.values()[t.depositCells()[cell]].name().toLowerCase(java.util.Locale.ROOT);
             default -> t.biomeAt(bx, bz).toString();
         };
         g.drawCenteredString(font, String.format("%.2f°%s %.2f°%s  |  %s  |  zoom x%d (scroll, drag, C: you)  |  G: %s map  |  R: replay drift  |  M to close",
                 Math.abs(lat), lat >= 0 ? "N" : "S", Math.abs(lon), lon >= 0 ? "E" : "W", here, zoom,
-                LAYERS[(layer + (layer == 1 && t.data.format < 64 ? 2 : 1)) % LAYERS.length]), width / 2, y0 + mapH + 6, 0xFFFFFF);
+                LAYERS[next(layer, t)]), width / 2, y0 + mapH + 6, 0xFFFFFF);
         int[] hover = view.blockAt(mouseX, mouseY, player);
         if (mark != null) { // the measuring line: dots from the mark to the cursor, a square on the mark
             double[] m = view.screenOf(mark, player);
@@ -270,9 +271,18 @@ public final class MapScreen extends Screen {
             }
             if (view.onMap(m[0], m[1])) g.fill((int) m[0] - 3, (int) m[1] - 3, (int) m[0] + 3, (int) m[1] + 3, 0xFFFFE040);
         }
-        if (hover != null)
-            g.drawCenteredString(font, String.format("x %d, z %d%s  |  right-click to teleport, shift-click to measure", hover[0], hover[1],
+        if (hover != null) {
+            int hy = t.column(hover[0], hover[1]).ground(); // the ground under the cursor, as the game builds it
+            g.drawCenteredString(font, String.format("x %d, z %d, y %d (%,.0f m)%s  |  right-click to teleport, shift-click to measure", hover[0], hover[1], hy, t.toMetres(hy),
                     mark == null ? "" : String.format("  |  %,d blocks from the mark", view.distance(mark, hover))), width / 2, y0 + mapH + 18, 0xAAAAAA);
+        }
+    }
+
+    /** The layer after l that this world has: no plates saved before format 64, no deposits before 92. */
+    private static int next(int l, Terrain t) {
+        do l = (l + 1) % LAYERS.length;
+        while (l == 2 && t != null && t.data.format < 64 || l == 5 && t != null && !t.deposits);
+        return l;
     }
 
     /** The plates drifting, frame by frame and blended between, over the whole map; false once it has run its course. */

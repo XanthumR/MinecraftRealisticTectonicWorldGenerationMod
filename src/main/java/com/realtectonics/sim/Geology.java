@@ -13,7 +13,7 @@ final class Geology {
 
     private Geology() {}
 
-    static byte[] provinces(Planet planet, float[] metres, float[] flow, float[] lakeMetres, java.util.List<Dome> domes) {
+    static byte[] provinces(Planet planet, float[] metres, float[] flow, float[] lakeMetres, java.util.List<Dome> domes, float[] plateau) {
         int w = planet.w, h = planet.h;
         float[] belts = planet.collision.clone(); // collisions happen on a line; the deformed belt is wider
         for (int pass = 0; pass < 3; pass++) blur(belts, w, h);
@@ -34,12 +34,33 @@ final class Geology {
             else if (belts[g] > OROGEN_ACTIVITY) r = Rock.OROGEN;
             else if (trench[g] <= ARC_REACH) r = Rock.ARC;
             else if (metres[g] < BASIN_METRES && wet[g] > BASIN_WETNESS) r = Rock.BASIN;
+            else if (plateau != null && plateau[g] > 0.3f) r = Rock.BASIN; // format 117: the lifted beds, however high they stand
             else r = cover[g] + (metres[g] - 500) / 3000 > shieldAbove ? Rock.CRATON : Rock.BASIN;
             for (Dome d : r == Rock.OCEANIC ? java.util.List.<Dome>of() : domes) // erosion stripped the beds off the core down to granite
                 if (d.lift(g % w + 0.5, g / w + 0.5, w) > DOME_CORE) r = Rock.CRATON;
             rock[g] = (byte) r.ordinal();
         }
         return rock;
+    }
+
+    /**
+     * Format 117: cells of flat-lying sedimentary platform at least minMetres high, by the same rules as provinces (not
+     * sea floor, a collision belt, an arc or exposed shield): uplifted beds, a caprock over soft shale.
+     */
+    static boolean[] platform(Planet planet, float[] metres, float minMetres) {
+        int w = planet.w, h = planet.h;
+        float[] belts = planet.collision.clone();
+        for (int pass = 0; pass < 3; pass++) blur(belts, w, h);
+        int[] trench = planet.trenchDistance(ARC_REACH);
+        float[] cover = Noise.fbm(w, h, planet.scaleWidth / 16, 4, new Random(planet.seed * 17 + 3));
+        float[] sorted = cover.clone();
+        java.util.Arrays.sort(sorted);
+        float shieldAbove = sorted[(int) (sorted.length * (1 - SHIELD_SHARE))];
+        boolean[] out = new boolean[w * h];
+        for (int g = 0; g < out.length; g++)
+            out[g] = planet.height[g] >= Planet.SEA_LEVEL && belts[g] <= OROGEN_ACTIVITY && trench[g] > ARC_REACH && metres[g] >= minMetres
+                    && cover[g] + (metres[g] - 500) / 3000 <= shieldAbove;
+        return out;
     }
 
     static void blur(float[] f, int w, int h) {

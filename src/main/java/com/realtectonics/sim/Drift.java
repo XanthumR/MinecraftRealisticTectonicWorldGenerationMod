@@ -7,7 +7,7 @@ package com.realtectonics.sim;
 public record Drift(int w, int h, byte[] ground, byte[] plate) {
     public static final int FRAMES = 30;          // kept per run, evenly over its steps; the map blends between them
     static final float METRES_STEP = 60;          // m per unit of ground: -7.7 to +7.6 km
-    private static final float[][] COLORS = {     // m, r, g, b: deep sea to shallows, then lowland green to highland brown to snow
+    static final float[][] COLORS = {             // m, r, g, b: deep sea to shallows, then lowland green to highland brown to snow (MapLayers.height too)
             {-6000, 8, 24, 70}, {-3000, 20, 60, 130}, {-200, 60, 130, 200}, {0, 110, 180, 220},
             {0, 70, 140, 60}, {600, 140, 170, 80}, {1800, 150, 120, 80}, {3500, 120, 100, 90}, {5000, 245, 245, 250}};
 
