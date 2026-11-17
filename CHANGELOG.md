@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- **Plates turn as well as slide**, small ones faster, as on a sphere: a boundary can collide at one end and slide past
+  or pull apart at the other, island arcs curve, and pieces that rift away swing open like scissors (new worlds only;
+  planet generation takes a little longer).
 - **Caldera rims**: no more thin walls of spires round a caldera; the rim is a crest over the caldera's cliff with the
   volcano's flank falling away outside (new worlds only).
 - **Natural maar and crater shapes**: maars and volcanoes' summit craters are drawn out and scalloped, with frayed
