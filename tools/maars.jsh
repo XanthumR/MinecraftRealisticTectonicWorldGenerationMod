@@ -26,7 +26,7 @@ for (var list : ((java.util.Map<Integer, java.util.List<?>>) lists.get(f.get(t))
       int g = t.relaxedColumn(x, z).ground();
       int hi = Integer.MIN_VALUE; for (int[] o : new int[][]{{1,0},{-1,0},{0,1},{0,-1}}) hi = Math.max(hi, t.relaxedColumn(x + o[0], z + o[1]).ground());
       if (g >= hi + 2) { posts++; if (posts <= 3) System.out.println("  post " + x + " " + z + " ground " + g + " neighbours up to " + hi); } }
-    for (int z = bz - R; z <= bz + R; z++) for (int x = bx - R; x <= bx + R; x++) { if (Math.hypot(x - mx, z - mz) >= r) continue; // only the maar's own water: rivers round it keep their old one-block steps
+    for (int z = bz - R; z <= bz + R; z++) for (int x = bx - R; x <= bx + R; x++) { if (Math.hypot(x - mx, z - mz) >= 1.4 * r) continue; // format 113 ragged edges reach 1.35 radii // only the maar's own water: rivers round it keep their old one-block steps
       var a = t.column(x, z); if (a.water() == Terrain.Column.NO_WATER || a.water() < a.ground()) continue;
       for (int[] o : new int[][]{{1,0},{-1,0},{0,1},{0,-1}}) { var b = t.column(x + o[0], z + o[1]);
         if (b.water() == Terrain.Column.NO_WATER && b.lava() == Terrain.Column.NO_WATER && Math.max(b.ground(), b.ice()) < a.water()) { spills++; if (spills <= 12) System.out.printf("  spill %d %d water %d ground %d next dry %d (%d %d) e %.2f next e %.2f rim %.0f lake %s%n", x, z, a.water(), a.ground(), b.ground(), x + o[0], z + o[1], Math.hypot(x - mx, z - mz) / r, Math.hypot(x + o[0] - mx, z + o[1] - mz) / r, rim, lake); if (spillAt == null) spillAt = x + " " + z + " water " + a.water() + " next dry " + b.ground(); } } }

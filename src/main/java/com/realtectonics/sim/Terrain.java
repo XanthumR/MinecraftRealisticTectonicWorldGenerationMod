@@ -139,6 +139,8 @@ public final class Terrain {
     static final float MAAR_CREST = 0.4f;   // of the radius: how far out from the edge the ring climbs to its crest (a cliff there left posts by the water)
     static final float MAAR_WALL = 0.6f;    // blocks per block: higher land round the crater is cut back this steep, which rock stands
     static final float MAAR_LEVEL = 0.8f;   // of the radius: the most the land round a maar may rise over its lowest point; steeper sites get none
+    static final float MAAR_RAGGED = 0.25f; // format 113: of the radius: how far the edge strays in and out round the crater (overlapping blasts)
+    static final float MAAR_FRAY = 0.1f;    // format 113: of the radius: how far 16-block noise frays the crater's and the tuff ring's edges
     static final int CHIMNEY_GRID = 8;      // format 90: real blocks between fairy chimney sites (each may hold one)
     static final float CHIMNEY_SHARE = 0.35f; // of the sites on a tuff slope that hold a chimney
     static final float CHIMNEY_SLOPE = 0.3f; // blocks per block the ground must fall at a site: chimneys stand on valley sides, not the plain
@@ -356,6 +358,7 @@ public final class Terrain {
     private final boolean ashFall;        // erupting arc volcanoes' ash blown downwind: format 86
     private final boolean hotCraters;     // magma patches round the crater, only a few vents on the flanks: format 87
     private final boolean maars;          // explosion craters with tuff rings and lakes round young volcanoes in wet country: format 88
+    private final boolean raggedMaars;    // maars scalloped and drawn out, not round: format 113
     private final boolean ignimbrites;    // tuff under the soil of supervolcanoes' ignimbrite plains (sim): format 89
     private final float[] tuff;           // format 89: 0..1 per cell, how much of it a supervolcano's ignimbrite covers
     private final boolean chimneys;       // fairy chimneys on the ignimbrite's slopes; ash and tuff ground gullied and screed like bare ground: format 90
@@ -532,6 +535,7 @@ public final class Terrain {
         ashFall = data.format >= 86;
         hotCraters = data.format >= 87;
         maars = data.format >= 88;
+        raggedMaars = data.format >= 113;
         ignimbrites = data.format >= 89;
         chimneys = data.format >= 90;
         travertines = data.format >= 91;
@@ -893,7 +897,7 @@ public final class Terrain {
      */
     private float coneGully(Cone c, double x, double z, double d) {
         for (Cone o : conesNear(x, z)) // nor across a maar's tuff ring, whose lake its notch would drain (seed 777, x -9133 z 3914)
-            for (Maar m : o.maars) if (hyp(wrapBlocks(x - m.x), z - m.z) < (1 + MAAR_APRON) * m.r + 6) return 0;
+            for (Maar m : o.maars) if (hyp(wrapBlocks(x - m.x), z - m.z) < (1 + MAAR_APRON) * m.r * (raggedMaars ? 1 + MAAR_RAGGED : 1) + 6) return 0;
         double t = d / c.radius, a = Math.atan2(z - c.z, wrapBlocks(x - c.x)) + 0.25 * fine(x, z, 64, 109);
         float n = noise(CONE_GULLY_RING * Math.cos(a), CONE_GULLY_RING * Math.sin(a), 8, 110), axis = Math.max(0, 1 - 4 * Math.abs(n)); // 1 on a gully's line
         float own = noise(CONE_GULLY_RING * Math.cos(a), CONE_GULLY_RING * Math.sin(a), 16, 112); // each gully its own depth and length; some barely start
@@ -1652,7 +1656,7 @@ public final class Terrain {
     private boolean ash(double x, double z) {
         for (Cone c : conesNear(x, z)) {
             for (Maar m : c.maars) // from format 88 a maar's tuff ring and dry floor are bare tuff too
-                if (hyp(wrapBlocks(x - m.x), z - m.z) < (1 + MAAR_APRON) * m.r && maarRim(m) != BREACHED) return true;
+                if (maarDistance(m, x, z) < 1 + MAAR_APRON && maarRim(m) != BREACHED) return true;
             if (!c.v.active() || c.v.hotspot() || c.collapsed) continue;
             double lat = Math.abs(Climate.latitude(Math.round(c.v.v()), h)), dx = wrapBlocks(x - c.x) / c.radius, dz = (z - c.z) / c.radius;
             double along = lat > 30 && lat < 60 ? dx : -dx; // westerlies blow east, trades and polar easterlies west
@@ -1673,7 +1677,7 @@ public final class Terrain {
      * edge, so no crater opens beside a river or lake.
      */
     private int maar(Maar m, double x, double z, int ground) {
-        double e = hyp(wrapBlocks(x - m.x), z - m.z) / m.r;
+        double e = maarDistance(m, x, z);
         if (e >= 1 + MAAR_APRON) return ground;
         float rim = maarRim(m);
         if (rim == BREACHED) return ground;
@@ -1684,9 +1688,27 @@ public final class Terrain {
         return Math.min(ground, Math.round(rim - MAAR_DEPTH * m.r * (1 - (float) (e * e * e * e))));
     }
 
+    /** Distance from a maar's middle in radii of its edge on that bearing: 1 on the crater's edge. */
+    private double maarDistance(Maar m, double x, double z) {
+        double dx = wrapBlocks(x - m.x), dz = z - m.z;
+        return raggedMaars ? hyp(dx, dz) / m.r / maarReach(m, Math.atan2(dz, dx)) + MAAR_FRAY * fine(x, z, 16, 140) : hyp(dx, dz) / m.r; // frayed at block scale: slumps, gullies, ash lobes
+    }
+
+    /**
+     * From format 113: how far out a maar's edge lies on bearing a, in radii. A real maar is blown out by many blasts
+     * from a vent that wanders, so its crater is drawn out one way and scalloped where the blasts overlapped (Ukinrek's
+     * two craters, the Eifel's oval Pulvermaar, Hverfjall's dented rim), not a circle; 1 before.
+     */
+    private float maarReach(Maar m, double a) {
+        if (!raggedMaars) return 1;
+        int key = (int) Math.floor(m.x) * 7919 + (int) Math.floor(m.z) * 104729;
+        return 1 + MAAR_RAGGED * (float) (0.5 * Math.sin(2 * a + 2 * Math.PI * hash01(key + 1)) + 0.3 * Math.sin(3 * a + 2 * Math.PI * hash01(key + 2))
+                + 0.2 * Math.sin(5 * a + 2 * Math.PI * hash01(key + 3)));
+    }
+
     /** From format 88: a wet maar's lake level, a block under its rim, inside the crater; else none. */
     private int maarLake(Maar m, double x, double z) {
-        if (!m.lake || hyp(wrapBlocks(x - m.x), z - m.z) >= m.r) return Column.NO_WATER;
+        if (!m.lake || maarDistance(m, x, z) >= 1) return Column.NO_WATER;
         float rim = maarRim(m);
         return rim == BREACHED ? Column.NO_WATER : Math.round(rim) - 1;
     }
@@ -1708,7 +1730,7 @@ public final class Terrain {
         busy[0] = true;
         try {
             for (int i = 0; i < 32; i++) {
-                double a = i * Math.PI / 16, ca = Math.cos(a), sa = Math.sin(a);
+                double a = i * Math.PI / 16, ca = Math.cos(a) * maarReach(m, a), sa = Math.sin(a) * maarReach(m, a); // from format 113 round its own ragged edge
                 Column at = column(m.x + 1.05 * m.r * ca, m.z + 1.05 * m.r * sa, false), in = i % 2 == 0 ? column(m.x + m.r * ca / 2, m.z + m.r * sa / 2, false) : at;
                 if (wet(at) || wet(in) || at.ice() != Column.NO_WATER || in.ice() != Column.NO_WATER || at.ground() <= SEA_Y + 1) rim = BREACHED;
                 rim = Math.min(rim, at.ground());
