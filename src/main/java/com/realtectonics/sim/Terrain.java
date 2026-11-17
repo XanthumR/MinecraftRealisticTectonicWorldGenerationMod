@@ -78,6 +78,8 @@ public final class Terrain {
     static final float CRATER_HEAT = 2.5f;            // format 38: craters' radii from an active vent within which its heat keeps ice off
     static final float CHERRY_PATCH = 0.45f, BADLANDS_METRES = 500; // cherry groves are rare; deserts this high are badlands
     static final float SOFT_BADLANDS_METRES = 800; // format 44: sedimentary deserts this high are badlands
+    static final float MESA_WOODS = 1500;          // format 117: metres above which badlands are wooded: plateau and mesa tops are cooler and catch more rain (pinyon-juniper from ~1.5 km)
+    static final float TABLE_CALM = 0.85f; // format 117: share of the valleys' relief flat-lying beds lose: a plateau's top stays flat, not ridged like a range
     static final float BASIN_RAGGED = 0.25f;       // format 101: share of the blurred basin rock the badlands' edge wanders by (noise over 64 blocks)
     static final float CALDERA_SHARE = 0.45f, CALDERA_SHIELDS = 0.35f, CALDERA_ISLANDS = 0.5f; // extinct arc volcanoes, shields, calderas with an island
     static final float CALDERA_RADIUS = 0.16f, CALDERA_DEPTH = 70, CALDERA_MIN = 40, CALDERA_LAKE = 0.35f; // of the footprint; blocks at most; smallest volcano; lake this far below the rim, of the depth
@@ -363,6 +365,7 @@ public final class Terrain {
     private final boolean raggedMaars;    // maars scalloped and drawn out, not round: format 113
     private final boolean raggedCraters;  // summit craters scalloped and drawn out, not round: format 114
     private final boolean calmRims;       // no valley ridges on caldera rims, which stood as thin walls: format 115
+    private final boolean mesaWoods;      // badlands this high are wooded on top, cooler and wetter than the lowland: format 117
     private final boolean ignimbrites;    // tuff under the soil of supervolcanoes' ignimbrite plains (sim): format 89
     private final float[] tuff;           // format 89: 0..1 per cell, how much of it a supervolcano's ignimbrite covers
     private final boolean chimneys;       // fairy chimneys on the ignimbrite's slopes; ash and tuff ground gullied and screed like bare ground: format 90
@@ -542,6 +545,7 @@ public final class Terrain {
         raggedMaars = data.format >= 113;
         raggedCraters = data.format >= 114;
         calmRims = data.format >= 115;
+        mesaWoods = data.format >= 117;
         ignimbrites = data.format >= 89;
         chimneys = data.format >= 90;
         travertines = data.format >= 91;
@@ -2903,6 +2907,7 @@ public final class Terrain {
         if (high <= VALLEY_HIGH) { out[1] = out[3] = 0; out[2] = 2; return; }
         float relief = Math.min(talus ? TALUS_MASSIF_RELIEF : MASSIF_RELIEF, MASSIF_SHARE * high) * smoothstep((high - 20) / 60);
         if (calmRims) relief *= rimCalm(x, z);
+        if (mesaWoods) relief *= 1 - TABLE_CALM * cubic(sediment, u, v) * smoothstep((natural - SEA_Y - TABLE_LOW) / (TABLE_HIGH - TABLE_LOW)); // format 117: flat-lying beds keep flat tops; their cliffs come from the stairs
         out[1] = Math.min(valleyCap, relief * valleyDepth); // both the ridges' slope over their valleys and how far either may stand off the cell's mean
         boolean wet = !Float.isNaN(lakeY[cell((int) Math.round(u), (int) Math.round(v))]); // lakes hold their water's level; rivers are cut later, along the valleys
         out[2] = wet ? 1 : 0;
@@ -3412,7 +3417,7 @@ public final class Terrain {
         if (b == Biome.DESERT && metres > (softBadlands ? SOFT_BADLANDS_METRES : BADLANDS_METRES)
                 && (!softBadlands || (raggedBadlands ? bilinear(sediment, warpU(x, z), warpV(x, z)) + BASIN_RAGGED * noise(x, z, 64, 58) > 0.5f
                         : Rock.of(data.rock[cell((int) Math.round(warpU(x, z)), (int) Math.round(warpV(x, z)))]) == Rock.BASIN)))
-            return rain > 200 ? Biome.WOODED_BADLANDS : Biome.BADLANDS;
+            return rain > 200 || mesaWoods && metres > MESA_WOODS ? Biome.WOODED_BADLANDS : Biome.BADLANDS; // from format 117 high tops wooded (Mesa Verde's pinyon and juniper)
         if (massifs && b == Biome.ICE_CAP) return noise(x, z, 256, 67) > ICE_SPIKE_PATCH ? Biome.ICE_SPIKES : Biome.SNOWY_PLAINS;
         return b;
     }
@@ -3433,7 +3438,7 @@ public final class Terrain {
         if (t < -2) return Biome.SNOWY_SLOPES;
         if (t < 4) return rain >= 400 ? Biome.GROVE : Biome.WINDSWEPT_HILLS;
         if (t < 12 && metres > MEADOW_METRES && rain >= 350 && noise(x, z, 256, 54) > -0.3f) return Biome.MEADOW;
-        if (rain < 600) return Biome.WINDSWEPT_HILLS;
+        if (rain < 600) return mesaWoods && bilinear(sediment, warpU(x, z), warpV(x, z)) > 0.5f ? Biome.WOODED_BADLANDS : Biome.WINDSWEPT_HILLS; // from format 117 a dry plateau's top is pinyon-juniper woodland (Mesa Verde), not bare windswept upland
         return b;
     }
 

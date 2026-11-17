@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- **Mesas and plateaus by differential erosion**: a few broad plateaus of layered rock rise ~2-3 km, hard beds over soft
+  shale. Rivers cut through and the shale wears back fast, so they stand as stepped mesas ~100 blocks over the plain with
+  flat tops, forest on wet ones and juniper woodland (wooded badlands) on dry ones (new worlds only).
+- **Height map**: a height layer on the planet map (M, then G): sea depth in blues, land from green lowlands to brown
+  highlands to snow, lakes blue; the map also shows the height under the cursor on every layer.
 - **Plates turn as well as slide**, small ones faster, as on a sphere: a boundary can collide at one end and slide past
   or pull apart at the other, island arcs curve, and pieces that rift away swing open like scissors (new worlds only;
   planet generation takes a little longer).

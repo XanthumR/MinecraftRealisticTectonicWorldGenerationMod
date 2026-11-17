@@ -1,6 +1,6 @@
 package com.realtectonics.sim;
 
-/** The planet map's extra views (M, then G), RGB per cell: plates, rain and temperature. */
+/** The planet map's extra views (M, then G), RGB per cell: plates, rain, temperature and height. */
 public final class MapLayers {
     private MapLayers() {}
 
@@ -34,6 +34,27 @@ public final class MapLayers {
         for (int g = 0; g < rgb.length; g++) {
             int c = ramp(ramp, (d.temperature[g] + 30) / 60);
             rgb[g] = d.metres[g] < 0 ? (c >> 1) & 0x7F7F7F : c; // the sea darker
+        }
+        return rgb;
+    }
+
+    /**
+     * Height: the sea from deep blue to the shallows, the land from lowland green to highland brown to snow at 5 km (the
+     * drift replay's colours), lakes blue; land shaded by the drop to the east cell, so ranges stand out.
+     */
+    public static int[] height(PlanetData d) {
+        float[][] c = Drift.COLORS;
+        int w = d.w;
+        int[] rgb = new int[w * d.h];
+        for (int g = 0; g < rgb.length; g++) {
+            float m = d.metres[g], east = d.metres[(g % w + 1) % w + g - g % w];
+            if (m >= 0 && !Float.isNaN(d.lakeMetres[g])) { rgb[g] = 0x3C82C8; continue; }
+            int i = m < 0 ? 1 : 5; // sea and land ramps meet at 0 m without blending
+            while (i < (m < 0 ? 3 : c.length - 1) && m > c[i][0]) i++;
+            float t = Math.clamp((m - c[i - 1][0]) / (c[i][0] - c[i - 1][0]), 0, 1), shade = m < 0 ? 1 : Math.clamp(1 + (m - east) / 1500, 0.6f, 1.3f);
+            int col = 0;
+            for (int k = 1; k <= 3; k++) col = col << 8 | Math.round(Math.min(255, (c[i - 1][k] + t * (c[i][k] - c[i - 1][k])) * shade));
+            rgb[g] = col;
         }
         return rgb;
     }

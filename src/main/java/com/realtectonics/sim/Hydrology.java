@@ -18,6 +18,7 @@ public final class Hydrology {
     static final float ERODIBILITY = 0.01f;  // K in the stream power law
     static final float AREA_EXPONENT = 0.5f; // m; slope exponent n = 1 keeps the implicit solve exact
     static final float CREEP = 0.03f;         // hillslope diffusion per pass: soil creeping downhill keeps valleys apart
+    static final float CREEP_FASTEST = 0.2f / CREEP; // format 117: times CREEP soft rock creeps at most: 4 neighbours at 4 x 0.2 stay under 1, past it the update swings into a checkerboard
     static final float CHANNEL_AREA = 50;     // flow above which water, not creep, shapes the ground: valley floors stay cut
     public static final float RIVER_AREA = 200; // flow before a stream counts as a river
     static final float MIN_EVAPORATION = 0.1f;  // metres per year off a lake surface near freezing (Siberia, Canada)
@@ -32,8 +33,24 @@ public final class Hydrology {
     static final float DOME_LOWLAND = 1000;     // metres: only on plains and low plateaus, not on a range
     static final float DOME_MIN = 4, DOME_MAX = 7;    // cells: half its length (the Black Hills ~100 km, the Adirondacks ~130, the Ozarks ~200; 1.2 km a block at Medium)
     static final int DOME_SPACING = 20;         // cells between dome middles
+    static final float PLATEAUS = 3; // format 117: uplifted sedimentary plateaus on a Medium planet's worth of land (the Colorado, the Ozark-sized ones)
+    static final float PLATEAU_MIN = 7, PLATEAU_MAX = 13; // format 117: cells, half its length (the Colorado Plateau ~600 km across; 1.2 km a block at Medium, 32 a cell)
+    static final float PLATEAU_METRES = 3200; // format 117: metres a typical plateau was lifted, flat-lying beds and all (the Colorado Plateau 1.5-2 km)
+    static final float PLATEAU_EDGE = 0.3f;     // format 117: of its radius, the rim over which a plateau rises to its full lift
+    static final float PLATEAU_RAGGED = 0.25f;  // format 117: of its radius, how far its outline wanders in and out
+    static final int PLATEAU_CALM = 5, PLATEAU_SPACING = 40; // format 117: cells a plateau's middle keeps from the coast; between plateau middles
     static final float DOME_METRES = 2500;      // how far a typical dome bowed the beds up at its middle (the Black Hills ~2.5 km; erosion takes about half back off the top)
     static final float VOLCANO_YOUTH = 0.33f;   // share of the erosion the volcanoes stand through: they are young beside the land
+    static final float CAP_MIN = 300;       // format 117: metres uplifted platform stands at least before it has a caprock to protect it (the Colorado Plateau ~1.5-2 km)
+    static final float CAP_THICK = 100; // format 117: metres of hard rock (sandstone, limestone) at the top of each bed, over its soft shale
+    static final float CAP_BED = 250; // format 117: metres of each bed, hard over soft, stacked down through the platform (the Grand Staircase's)
+    static final float CAP_HARD = 0.3f; // format 117: times as fast as other rock the hard beds wear
+    static final float CAP_SOFT = 12;       // format 117: times as fast the shale wears once the caprock over it is gone
+    static final float CAP_UNDERCUT = 80; // format 117: metres a neighbour lies below the caprock's base before the shale under its edge is worn out and it breaks off
+    static final float CAP_UNDERMINED = 1; // format 117: times as fast an undercut edge of caprock wears: the cliff retreats
+    static final float CAP_HUMID = 1500;  // format 117: mm of rain a year at which plants and soil halve the contrast (in powers): mesas are a dry land's
+    static final float CAP_PATCHY = 0.8f; // format 117: how much the caprock's thickness and hardness vary in patches a few cells wide: the strong ones outlast the rest as mesas
+    static final int CAP_PATCH = 128; // format 117: noise cells round a Medium planet for the caprock's patches (power of two)
     static final float BELT_UPLIFT = 0.15f;      // format 112: crust units a pass a still-active collision belt rises while the rivers cut it (0.3 ran belts into MAX_CRUST)
     static final float BELT_FULL = 1;           // format 112: Planet.orogeny (blurred) at which a belt rises at the full rate
     static final int BELT_REACH = 3;            // format 112: blurs of the suture's activity: how many cells inland the belt rises
@@ -80,6 +97,7 @@ public final class Hydrology {
     public final float[] flow;      // rain from upstream, in cells x metres per year
     public final List<Volcano> volcanoes = new ArrayList<>(); // with their bases, as built into this landscape
     public final List<Dome> domes = new ArrayList<>(); // format 107: dome mountains bowed up in calm continent, before the erosion
+    public float[] plateau;          // format 117: 0-1 per cell, how much of an uplifted sedimentary plateau's lift it got; null for none
     public final byte[] ice;        // 0, GLACIATED or FJORD: what the Ice Age glaciers did here
     private final boolean[] lake;
     private final float[] lakeLevel; // lake surface where lake is true: the spill level, or lower in a shrunken lake
@@ -92,6 +110,7 @@ public final class Hydrology {
     private int count;
     private float erodibility = ERODIBILITY;
     private float[] weakness;        // per cell, times faster the rock erodes: crushed along faults; null for all alike
+    private float[] capTop, rockRate, capStrength; // format 117: metres the beds' top lay at (NaN: none); times faster the rock at the surface erodes this pass; the hard beds' patchy strength, ~1
 
     public Hydrology(Planet planet, float[] rainMm, int iterations, long seed) {
         this(planet, rainMm, new float[planet.w * planet.h], iterations, seed, done -> {});
@@ -129,6 +148,7 @@ public final class Hydrology {
         for (int g = 0; g < n; g++) weakness[g] = Math.min(1, slip[g] / FAULT_FULL_SLIP);
         Geology.blur(weakness, w, h);
         for (int g = 0; g < n; g++) weakness[g] = 1 + FAULT_GOUGE * Math.min(1, 3 * weakness[g]); // the blur spreads a line over 3 cells
+        if (!planet.earth) caprock(planet);
         erodeAndBuild(planet, iterations, progress);
     }
 
@@ -164,6 +184,7 @@ public final class Hydrology {
             elevation[g] = Planet.fromMetres(Math.max(RIFT_KEEL, m * (1 - RIFT_SINK * down) + RIFT_SHOULDER * up));
         }
         domes(planet, seed, shore, floor);
+        plateaus(planet, seed, shore);
         int[] offshore = distanceFrom(g -> elevation[g] >= 0), trench = distanceFrom(g -> planet.subduction[g] > Planet.ARC_ACTIVITY);
         float[] breadth = Noise.fbm(w, h, planet.scaleWidth / 32, 4, new Random(seed * 13 + 5)), shelf = new float[n];
         for (int g = 0; g < n; g++) {
@@ -204,6 +225,7 @@ public final class Hydrology {
             if (i == conesAt) beforeCones = buildCones(planet);
             route();
             markGlaciers();
+            if (rockRate != null) rockRates();
             erode();
             creep();
             if (uplift != null) for (int g = 0; g < uplift.length; g++) if (uplift[g] > 0 && elevation[g] > 0) elevation[g] = Math.min(Planet.MAX_CRUST - Planet.SEA_LEVEL, elevation[g] + uplift[g]);
@@ -230,6 +252,48 @@ public final class Hydrology {
         for (int pass = 0; pass < BELT_REACH; pass++) blur(u);
         for (int g = 0; g < u.length; g++) u[g] = BELT_UPLIFT * Math.min(1, u[g] / BELT_FULL);
         return u;
+    }
+
+    /**
+     * Format 117: mesas by differential erosion. Uplifted flat-lying beds (Geology.platform) carry a hard caprock
+     * CAP_THICK deep over soft shale. The caprock wears slowly and keeps the top flat; once a river cuts through it the
+     * shale wears fast, so valleys widen and deepen into plains; where a neighbour lies well below an edge's base the
+     * shale under the edge is worn out, the caprock breaks off and the cliff retreats. What the widening valleys leave
+     * between them stands alone as flat-topped mesas, shrinking to buttes (the Colorado Plateau, Monument Valley).
+     */
+    private void caprock(Planet planet) {
+        int n = w * h;
+        float[] metres = new float[n];
+        for (int g = 0; g < n; g++) metres[g] = Planet.metres(elevation[g]);
+        boolean[] beds = Geology.platform(planet, metres, CAP_MIN);
+        for (int g = 0; plateau != null && g < n; g++) beds[g] |= plateau[g] > 0.3f && elevation[g] > 0; // lifted beds stay beds, however high
+        capStrength = Noise.fbm(w, h, planet.scaleWidth / 1024 * CAP_PATCH, 3, new Random(planet.seed * 59 + 7)); // ~0.875 mean, about +-0.5
+        for (int g = 0; g < n; g++) capStrength[g] = Math.clamp(1 + CAP_PATCHY * 2 * (capStrength[g] - 0.875f), 0.1f, 2);
+        capTop = new float[n];
+        boolean any = false;
+        for (int g = 0; g < n; g++) {
+            capTop[g] = beds[g] ? metres[g] : Float.NaN;
+            any |= beds[g];
+        }
+        if (any) rockRate = new float[n];
+    }
+
+    /** Format 117: how fast the rock at each cell's surface wears this pass: caprock, undercut caprock, or shale; drier, the starker. */
+    private void rockRates() {
+        for (int g = 0; g < w * h; g++) {
+            if (Float.isNaN(capTop[g])) { rockRate[g] = 1; continue; }
+            float m = Planet.metres(elevation[g]), rate = CAP_SOFT, depth = Math.max(0, capTop[g] - m), k = (float) Math.floor(depth / CAP_BED);
+            float hardBase = capTop[g] - k * CAP_BED - CAP_THICK * capStrength[g]; // the foot of the hard bed of this layer
+            if (m > hardBase) { // in a hard bed
+                int x = g % w, y = g / w;
+                float low = m;
+                for (int nb : new int[]{Math.floorMod(x - 1, w) + y * w, (x + 1) % w + y * w, y > 0 ? g - w : g, y < h - 1 ? g + w : g})
+                    low = Math.min(low, Planet.metres(Math.max(elevation[nb], 0)));
+                rate = low < hardBase - CAP_UNDERCUT * capStrength[g] ? CAP_UNDERMINED : (float) Math.pow(CAP_HARD, capStrength[g]); // a strong patch holds harder and longer
+            }
+            float dry = Math.clamp(1 - rainMm[g] / CAP_HUMID, 0, 1);
+            rockRate[g] = (float) Math.pow(rate, 0.5 + 0.5 * dry);
+        }
     }
 
     /** Puts every volcano's cone into the land; returns the land as it was before them. */
@@ -573,7 +637,8 @@ public final class Hydrology {
             float sum = 0;
             for (int k = 0; k < 4; k++) {
                 int n = k == 0 ? Math.floorMod(x - 1, w) + y * w : k == 1 ? (x + 1) % w + y * w : k == 2 ? (y > 0 ? g - w : g) : y < h - 1 ? g + w : g;
-                sum += Math.max(before[n], 0) - before[g]; // the sea pulls a coast down only to sea level
+                float d = Math.max(before[n], 0) - before[g]; // the sea pulls a coast down only to sea level
+                sum += rockRate == null ? d : d * Math.min(CREEP_FASTEST, d > 0 ? rockRate[n] : rockRate[g]); // format 117: each side's rock sets how fast it gives way, up to what creep stays stable at
             }
             elevation[g] = Math.max(0.001f, before[g] + CREEP * sum);
         }
@@ -585,6 +650,51 @@ public final class Hydrology {
      * erosion, so rivers drain it outward and cut it the way they cut everything else; Terrain bows the rock beds over
      * it, which wear into rings of hogbacks round a granite core.
      */
+    private void plateaus(Planet planet, long seed, int[] shore) {
+        int n = w * h;
+        float[] metres = new float[n];
+        for (int g = 0; g < n; g++) metres[g] = Planet.metres(elevation[g]);
+        boolean[] beds = Geology.platform(planet, metres, 0);
+        Random rnd = new Random(seed * 43 + 11);
+        List<Integer> sites = new ArrayList<>();
+        for (int g = 0; g < n; g++) if (beds[g] && shore[g] > PLATEAU_CALM) sites.add(g);
+        java.util.Collections.shuffle(sites, rnd);
+        int want = Math.round(PLATEAUS * n / (1024 * 512f)); // as many per Medium planet's worth of land as domes
+        List<float[]> placed = new ArrayList<>();
+        for (int g : sites) {
+            if (placed.size() >= want) break;
+            boolean crowded = false;
+            for (float[] p : placed) { double dx = p[0] - g % w; dx -= w * Math.rint(dx / w); crowded |= Math.hypot(dx, p[1] - g / w) < PLATEAU_SPACING; }
+            if (crowded) continue;
+            float a = PLATEAU_MIN + (PLATEAU_MAX - PLATEAU_MIN) * rnd.nextFloat();
+            placed.add(new float[]{g % w + 0.5f, g / w + 0.5f, a, a * (0.55f + 0.4f * rnd.nextFloat()), (float) (Math.PI * rnd.nextFloat()), PLATEAU_METRES * (0.8f + 0.4f * rnd.nextFloat())});
+        }
+        if (placed.isEmpty()) return;
+        plateau = new float[n];
+        float[] wander = Noise.fbm(w, h, planet.scaleWidth / 32, 3, new Random(seed * 47 + 13)), flat = new float[n]; // ~0.875 mean; how much of the land round is flat-lying beds
+        for (int g = 0; g < n; g++) flat[g] = beds[g] ? 1 : 0;
+        for (int pass = 0; pass < 2; pass++) blur(flat); // only the beds rise: a collision belt or arc the oval reaches keeps its height, without a wall at the edge
+        for (float[] p : placed)
+            for (int dy = (int) -Math.ceil(1.3 * p[2]); dy <= Math.ceil(1.3 * p[2]); dy++)
+                for (int dx = (int) -Math.ceil(1.3 * p[2]); dx <= Math.ceil(1.3 * p[2]); dx++) {
+                    int y = (int) p[1] + dy, x = Math.floorMod((int) p[0] + dx, w), g = x + y * w;
+                    if (y < 0 || y >= h || elevation[g] <= 0) continue;
+                    double ddx = x + 0.5 - p[0], ddy = y + 0.5 - p[1];
+                    ddx -= w * Math.rint(ddx / w);
+                    double c = Math.cos(p[4]), s = Math.sin(p[4]), along = (ddx * c + ddy * s) / p[2], across = (ddy * c - ddx * s) / p[3];
+                    float r = (float) Math.hypot(along, across) + PLATEAU_RAGGED * 2 * (wander[g] - 0.875f);
+                    float lift = smoothstep((1 - r) / PLATEAU_EDGE) * smoothstep(flat[g]);
+                    if (lift <= plateau[g]) continue;
+                    elevation[g] = Planet.fromMetres(Planet.metres(elevation[g]) + p[5] * (lift - plateau[g])); // the beds lifted flat, a broad rim round them
+                    plateau[g] = lift;
+                }
+    }
+
+    private static float smoothstep(float t) {
+        t = Math.clamp(t, 0, 1);
+        return t * t * (3 - 2 * t);
+    }
+
     private void domes(Planet planet, long seed, int[] shore, float[] rift) {
         Random rnd = new Random(seed * 41 + 9);
         int[] trench = distanceFrom(g -> planet.subduction[g] > Planet.ARC_ACTIVITY), belt = distanceFrom(g -> planet.collision[g] > 1), rifted = distanceFrom(g -> rift[g] > 0);
@@ -617,7 +727,7 @@ public final class Hydrology {
             int c = order[i], r = receiver[c];
             if (r < 0) continue;
             float dist = c % w == r % w || c / w == r / w ? 1 : 1.4142135f;
-            float f = erodibility * (ice[c] != 0 ? GLACIAL_EROSION : 1) * (weakness == null ? 1 : weakness[c]) * (float) Math.pow(flow[c], AREA_EXPONENT) / dist;
+            float f = erodibility * (ice[c] != 0 ? GLACIAL_EROSION : 1) * (weakness == null ? 1 : weakness[c]) * (rockRate == null ? 1 : rockRate[c]) * (float) Math.pow(flow[c], AREA_EXPONENT) / dist;
             float base = Math.max(elevation[r], 0); // rivers cut down to sea level, not below
             elevation[c] = (elevation[c] + f * base) / (1 + f);
         }
