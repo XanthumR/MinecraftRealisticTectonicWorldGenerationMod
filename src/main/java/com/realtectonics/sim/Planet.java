@@ -26,6 +26,9 @@ public final class Planet {
     static final float DIFFUSION = 0.04f;         // hillslope creep; rivers do the rest, interleaved with the plates
     static final float THICK = 5.5f;             // format 112: crust units past which thickened continental crust flows sideways under its own weight (~1.5 km high): belts 2-4 cells wide, not one-cell walls
     static final float THICK_FLOW = 0.2f;         // format 112: share of the thickness difference past THICK a cell passes to a neighbour a step (with DIFFUSION under 1/4: stable)
+    static final float SPIN_RIM = 0.15f;          // format 116: cells a step a plate's edge moves at most from its turning, so small plates turn faster (Iberia 35 deg, Corsica-Sardinia 30)
+    static final int NEAR_ROWS = 4;               // format 116: rows a turned plate's crust may move in a step (MAX_SPEED, the turn, the shears' rounding), so compositing skips the rest
+    static final float SPIN_MAX = 0.004f;         // format 116: radians a step the smallest plates turn at most (~70 deg in a 300-step run)
     static final float COLLISION_DRAG = 0.03f;    // per overlapping continent cell: a 50-cell front stops a plate in a few steps (format 109; 0.002 before, ~30 steps, and colliding continents ate each other: 30% land to 17% in 1200 steps)
     static final float OLD_OCEAN = OCEAN + 0.2f;  // ocean floor this cold and dense sinks at trenches
     static final float SLAB_PULL = 0.00025f;      // per trench cell; terminal speed = pull * trench length / drag
@@ -107,6 +110,7 @@ public final class Planet {
     private boolean gathering;
     private int phaseStart, lastBreakup = Integer.MAX_VALUE; // step the current phase began; step of the planned final breakup
     private int lastSplit = Integer.MIN_VALUE / 2; // format 110: step the last back-arc strip tore off
+    private Random spinRnd;                // format 116: each new plate's spin, its own stream so the rest draws the same
     private final double firstSpread;     // mean distance of continental cells from their centre in the first supercontinent
 
     public static final class Plate {
@@ -114,17 +118,22 @@ public final class Planet {
         private final float[][] tiles; // plate-local frame in TILE x TILE tiles; 0 (or a null tile) = no crust here
         private final int tilesX;
         final boolean[] rowHasCrust; // per local row: false means that whole row is empty, so compositing skips it
+        final boolean[] nearRow;     // format 116, per global row: a turned plate may hold crust there (its rows run aslant)
         float ox, oy;        // offset of local frame in global cells
         int oxi, oyi;
         float vx, vy;        // cells per step, |v| < 1
         int born = Integer.MIN_VALUE / 2; // format 110: step a back-arc strip broke off as this plate; long ago for the rest
         int parent = -1;     // format 110: while young, the plate a back-arc strip tore from; -1 for the rest
         float pullX, pullY;  // format 110: unit direction toward the strip's trench, which it rolls back along
+        float ang, spin;     // format 116: radians the plate has turned (counter-clockwise on the map) and turns a step
+        float tn, sn;        // format 116: tan(-ang/2) and sin(-ang), the shears that turn a global cell back into the frame
+        int px, py;          // format 116: the local cell the plate turns about: its middle when its frame was laid
 
         Plate(int width, int height, float vx, float vy) {
             tilesX = width / TILE;
             tiles = new float[tilesX * Math.ceilDiv(height, TILE)][];
             rowHasCrust = new boolean[height];
+            nearRow = new boolean[height];
             this.vx = vx;
             this.vy = vy;
         }
@@ -207,6 +216,13 @@ public final class Planet {
             plates[p] = new Plate(w, h, (float) (Math.cos(angle) * speed), (float) (Math.sin(angle) * speed));
         }
         for (int g = 0; g < w * h; g++) plates[owner[g]].set(g % w, g / w, height[g]);
+        spinRnd = new Random(seed * 97 + 11);
+        Centroids c0 = centroids();
+        for (int p = 0; p < plateCount; p++) { // format 116: every plate turns a little about its middle
+            plates[p].px = (int) c0.x()[p];
+            plates[p].py = (int) Math.round(c0.y()[p]);
+            setSpin(plates[p], c0.area()[p]);
+        }
         double[] spread = continentSpread();
         firstSpread = spread[2];
         mantleFlow(1 / MANTLE_DRAG); // the breakup has begun: the pieces already move apart at their full pace
@@ -496,38 +512,118 @@ public final class Planet {
     }
 
     private float crustAt(Plate p, int gx, int gy) {
-        return p.get(Math.floorMod(gx - p.oxi, w), Math.floorMod(gy - p.oyi, h));
+        int l = local(p, gx, gy);
+        return p.get(l % w, l / w);
     }
 
     private void setCrust(Plate p, int gx, int gy, float c) {
-        p.set(Math.floorMod(gx - p.oxi, w), Math.floorMod(gy - p.oyi, h), c);
+        int l = local(p, gx, gy);
+        p.set(l % w, l / w, c);
+    }
+
+    /**
+     * Format 116: the plate-local cell (lx + ly * w) under global cell (gx, gy): the frame's offset, then turned back
+     * by the plate's angle about its pivot in three shears (Paeth 1986). Each shear moves whole rows or columns round
+     * the wrap, so the map is one to one: no crust doubled or lost however far a plate turns, and rows stay
+     * independent for compositing. Plates turn as they do on a sphere about their Euler poles, so the motion changes
+     * along a boundary: one end closing while the other slides past or opens (Pacific-North America).
+     */
+    private int local(Plate p, int gx, int gy) {
+        int tx = Math.floorMod(gx - p.oxi, w), ty = Math.floorMod(gy - p.oyi, h);
+        if (p.ang == 0) return tx + ty * w;
+        int x = wrapW(tx - p.px), y = wrapH(ty - p.py);
+        x = wrapW(x - Math.round(p.tn * y));
+        y = wrapH(y + Math.round(p.sn * x));
+        x = wrapW(x - Math.round(p.tn * y));
+        return Math.floorMod(p.px + x, w) + Math.floorMod(p.py + y, h) * w;
+    }
+
+    /** Format 116: the inverse of local, the global cell over local cell l. */
+    private int global(Plate p, int l) {
+        int x = l % w, y = l / w;
+        if (p.ang != 0) {
+            x = wrapW(x - p.px);
+            y = wrapH(y - p.py);
+            x = wrapW(x + Math.round(p.tn * y));
+            y = wrapH(y - Math.round(p.sn * x));
+            x = wrapW(x + Math.round(p.tn * y)) + p.px;
+            y += p.py;
+        }
+        return Math.floorMod(x + p.oxi, w) + Math.floorMod(y + p.oyi, h) * w;
+    }
+
+    private int wrapW(int v) {
+        return Math.floorMod(v + w / 2, w) - w / 2;
+    }
+
+    private int wrapH(int v) {
+        return Math.floorMod(v + h / 2, h) - h / 2;
+    }
+
+    /** Format 116: a plate's spin, random in sign and size, at most SPIN_RIM cells a step at its edge. */
+    private void setSpin(Plate p, int area) {
+        double r = Math.sqrt(Math.max(1, area) / Math.PI);
+        p.spin = (float) Math.clamp((spinRnd.nextDouble() * 2 - 1) * SPIN_RIM / r, -SPIN_MAX, SPIN_MAX);
+    }
+
+    /** Format 116: how fast plate p moves at global cell g, its turning included, in cells a step. */
+    private float velX(int p, int g) {
+        Plate q = plates[p];
+        return q.spin == 0 ? q.vx : q.vx - q.spin * wrapH(g / w - q.py - q.oyi);
+    }
+
+    private float velY(int p, int g) {
+        Plate q = plates[p];
+        return q.spin == 0 ? q.vy : q.vy + q.spin * wrapW(g % w - q.px - q.oxi);
+    }
+
+    /**
+     * Format 116: lays a plate's crust afresh in an unturned frame (local = global) turning about (px, py), so a piece
+     * rifted or torn off turns about its own middle, not the old plate's. A plate holds crust only where it owns the cell.
+     */
+    private void relay(int p, int px, int py) {
+        Plate q = plates[p];
+        float[] crust = new float[w * h];
+        for (int g = 0; g < w * h; g++) if (owner[g] == p) crust[g] = crustAt(q, g % w, g / w);
+        q.clear();
+        q.ox -= q.oxi;
+        q.oy -= q.oyi;
+        q.oxi = q.oyi = 0;
+        q.ang = q.tn = q.sn = 0;
+        q.px = px;
+        q.py = py;
+        for (int g = 0; g < w * h; g++) if (crust[g] != 0) q.set(g % w, g / w, crust[g]);
     }
 
     public void step() {
-        int[] shiftX = new int[plates.length], shiftY = new int[plates.length];
-        for (int i = 0; i < plates.length; i++) {
-            Plate p = plates[i];
-            int ox0 = p.oxi, oy0 = p.oyi;
+        int[] riding = new int[seamounts.size()]; // each hotspot volcano's cell on its plate, before the plates move
+        for (int i = 0; i < riding.length; i++) riding[i] = local(plates[seamounts.get(i)[1]], seamounts.get(i)[0] % w, seamounts.get(i)[0] / w);
+        for (Plate p : plates) {
             p.ox += p.vx;
             p.oy += p.vy;
             p.oxi = Math.round(p.ox);
+            if (p.spin != 0) { // format 116
+                p.ang += p.spin;
+                p.tn = (float) Math.tan(-p.ang / 2);
+                p.sn = (float) Math.sin(-p.ang);
+            }
             int noy = Math.round(p.oy);
             if (noy != p.oyi) {
                 // The local frame is a torus but the poles are not: drop the row that wrapped across them.
                 // ponytail: crust is destroyed/created at the poles; fine while poles are ice caps
                 int gy = noy < p.oyi ? h - 1 : 0;
                 p.oyi = noy;
-                p.clearRow(Math.floorMod(gy - noy, h));
+                if (p.ang == 0) p.clearRow(Math.floorMod(gy - noy, h));
+                else for (int x = 0; x < w; x++) { int l = local(p, x, gy); p.set(l % w, l / w, 0); } // the turned frame's cells there
             }
-            shiftX[i] = p.oxi - ox0;
-            shiftY[i] = p.oyi - oy0;
         }
         // Hotspot volcanoes ride their plate; off the poles they are gone.
-        seamounts.removeIf(s -> {
-            int y = s[0] / w + shiftY[s[1]];
-            s[0] = Math.floorMod(s[0] % w + shiftX[s[1]], w) + y * w;
-            return y < 0 || y >= h;
-        });
+        for (int i = riding.length - 1; i >= 0; i--) {
+            int[] s = seamounts.get(i);
+            int g = global(plates[s[1]], riding[i]);
+            if (Math.abs(g / w - s[0] / w) > h / 2) seamounts.remove(i);
+            else s[0] = g;
+        }
         // Rows are independent: each global cell maps to a distinct local cell of every plate.
         AtomicIntegerArray collisions = new AtomicIntegerArray(plates.length);
         int[] area = new int[plates.length];
@@ -541,6 +637,7 @@ public final class Planet {
             float drag = 1 / (1 + COLLISION_DRAG * collisions.get(p));
             plates[p].vx *= drag;
             plates[p].vy *= drag;
+            plates[p].spin *= drag; // format 116: a collision brakes the turning too
         }
         float[] next = height.clone();
         IntStream.range(0, h).parallel().forEach(y -> diffuseRow(y, next));
@@ -569,11 +666,12 @@ public final class Planet {
 
     /** A plate has crust exactly where it owns the cell (compositing zeroes every loser), so ownership says which rows hold any. */
     private void markRows() {
-        for (Plate p : plates) Arrays.fill(p.rowHasCrust, false);
+        for (Plate p : plates) { Arrays.fill(p.rowHasCrust, false); Arrays.fill(p.nearRow, false); }
         for (int y = 0; y < h; y++)
             for (int x = 0; x < w; x++) {
                 Plate p = plates[owner[x + y * w]];
                 p.rowHasCrust[Math.floorMod(y - p.oyi, h)] = true;
+                for (int k = Math.max(0, y - NEAR_ROWS); k <= Math.min(h - 1, y + NEAR_ROWS); k++) p.nearRow[k] = true;
             }
     }
 
@@ -586,7 +684,7 @@ public final class Planet {
                 for (int k = 0; k < 2; k++) { // east and south neighbours: each boundary once
                     int n = k == 0 ? (x + 1) % w + y * w : g + w, s = sinker(g, n);
                     if (s < 0) continue;
-                    float closing = k == 0 ? plates[owner[g]].vx - plates[owner[n]].vx : plates[owner[g]].vy - plates[owner[n]].vy;
+                    float closing = k == 0 ? velX(owner[g], g) - velX(owner[n], n) : velY(owner[g], g) - velY(owner[n], n);
                     if (closing > RIFT_SPREAD) trench[s] = 1;
                 }
             }
@@ -602,7 +700,7 @@ public final class Planet {
                 for (int k = 0; k < 2; k++) { // east and south neighbours: each boundary once
                     int n = k == 0 ? (x + 1) % w + y * w : g + w, a = owner[g], b = owner[n];
                     if (a == b || height[g] < SEA_LEVEL || height[n] < SEA_LEVEL) continue;
-                    float apart = k == 0 ? plates[b].vx - plates[a].vx : plates[b].vy - plates[a].vy;
+                    float apart = k == 0 ? velX(b, n) - velX(a, g) : velY(b, n) - velY(a, g);
                     if (apart > RIFT_SPREAD) rift[g] = rift[n] = 1;
                 }
             }
@@ -629,13 +727,13 @@ public final class Planet {
                     for (int dx = -FAULT_WINDOW; dx <= FAULT_WINDOW; dx++) {
                         int yy = y + dy;
                         if (yy < 0 || yy >= h || dx == 0 && dy == 0) continue;
-                        int b = owner[Math.floorMod(x + dx, w) + yy * w];
+                        int nbc = Math.floorMod(x + dx, w) + yy * w, b = owner[nbc];
                         if (b == a) continue;
                         float k = 1f / (dx * dx + dy * dy);
                         nx += dx * k;
                         ny += dy * k;
-                        vx += plates[b].vx * k;
-                        vy += plates[b].vy * k;
+                        vx += velX(b, nbc) * k;
+                        vy += velY(b, nbc) * k;
                     }
                 float len = (float) Math.hypot(nx, ny), wsum = 0;
                 if (len == 0) continue;
@@ -644,7 +742,7 @@ public final class Planet {
                         int yy = y + dy;
                         if (yy >= 0 && yy < h && !(dx == 0 && dy == 0) && owner[Math.floorMod(x + dx, w) + yy * w] != a) wsum += 1f / (dx * dx + dy * dy);
                     }
-                float rx = vx / wsum - plates[a].vx, ry = vy / wsum - plates[a].vy; // the other side's motion, seen from this plate
+                float rx = vx / wsum - velX(a, g), ry = vy / wsum - velY(a, g); // the other side's motion, seen from this plate
                 slip[g] = Math.abs(rx * ny - ry * nx) / len; // along the boundary; the rest opens a rift or builds a range
             }
         return slip;
@@ -708,7 +806,7 @@ public final class Planet {
             dist[c] = len;
             if (len > 0 && height[c] >= SEA_LEVEL) {
                 Plate p = plates[owner[c]];
-                float advance = (p.vx * tx + p.vy * ty) / len; // toward the trench
+                float advance = (velX(owner[c], c) * tx + velY(owner[c], c) * ty) / len; // toward the trench
                 float zone = Math.clamp((len - BACKARC_FROM) / 2, 0, 1) * Math.clamp((BACKARC_TO - len) / 4, 0, 1);
                 stretch[c] = zone * Math.clamp((BACKARC_HOLD - advance) / BACKARC_RANGE, 0, 1);
             }
@@ -848,12 +946,17 @@ public final class Planet {
         d.oy = big.oy;
         d.oxi = big.oxi;
         d.oyi = big.oyi;
+        d.ang = big.ang; // format 116: the whole frame, turn and pivot too
+        d.tn = big.tn;
+        d.sn = big.sn;
+        d.px = big.px;
+        d.py = big.py;
         for (int g = 0; g < w * h; g++) {
             if (owner[g] != largest) continue;
             double dx = dx(c.x[largest], g % w), dy = g / w - c.y[largest], along = -dx * ny + dy * nx;
             double wiggle = 16 * scale * (Math.sin(along / (23 * scale) + phase) + 0.5 * Math.sin(along / (9 * scale) + 2 * phase));
             if (dx * nx + dy * ny + wiggle <= 0) continue;
-            int lx = Math.floorMod(g % w - big.oxi, w), ly = Math.floorMod(g / w - big.oyi, h); // same frame offset, so same local cell in d
+            int l = local(big, g % w, g / w), lx = l % w, ly = l / w; // d has big's frame, so the same local cell
             d.set(lx, ly, big.get(lx, ly));
             big.set(lx, ly, 0);
             owner[g] = dead;
@@ -861,12 +964,16 @@ public final class Planet {
         if (rough != null) { // format 102: a ragged rift where it crosses continent
             int split = dead, whole = largest;
             for (int g : raggedEdges(owner, k -> owner[k] == whole || owner[k] == split)) {
-                int lx = Math.floorMod(g % w - big.oxi, w), ly = Math.floorMod(g / w - big.oyi, h);
+                int l = local(big, g % w, g / w), lx = l % w, ly = l / w;
                 Plate to = owner[g] == split ? d : big, from = to == d ? big : d;
                 to.set(lx, ly, from.get(lx, ly));
                 from.set(lx, ly, 0);
             }
         }
+        Centroids after = centroids(); // format 116: each half turns about its own middle, the new one at its own pace
+        relay(dead, (int) after.x[dead], (int) Math.round(after.y[dead]));
+        relay(largest, (int) after.x[largest], (int) Math.round(after.y[largest]));
+        setSpin(d, after.area[dead]);
         d.parent = -1;
         setVelocity(d, big.vx + nx * RIFT_SPEED, big.vy + ny * RIFT_SPEED);
         setVelocity(big, big.vx - nx * RIFT_SPEED, big.vy - ny * RIFT_SPEED);
@@ -891,9 +998,10 @@ public final class Planet {
             int ly = Math.floorMod(y - plates[p].oyi, h);
             row[p] = ly;
             shift[p] = Math.floorMod(-plates[p].oxi, w);
-            if (plates[p].rowHasCrust[ly]) active[actives++] = p;
+            if (plates[p].ang != 0 ? plates[p].nearRow[y] : plates[p].rowHasCrust[ly]) active[actives++] = p; // a turned plate's rows run aslant: by the global rows it held
         }
         int[] present = new int[plates.length]; // plates with crust over this cell, in index order
+        int[] at = new int[plates.length];      // each plate's local cell (lx + ly * w) under this one
         for (int x = 0; x < w; x++) {
             int g = x + y * w, best = -1, count = 0;
             float bestC = 0;
@@ -907,7 +1015,8 @@ public final class Planet {
             // of new sea floor behind it. Where neither held it the larger plate takes it.
             for (int a = 0; a < actives; a++) {
                 int p = active[a];
-                float c = plates[p].get(wrapX(x + shift[p]), row[p]);
+                at[p] = plates[p].ang == 0 ? wrapX(x + shift[p]) + row[p] * w : local(plates[p], x, y);
+                float c = plates[p].get(at[p] % w, at[p] / w);
                 if (c > 0) present[count++] = p;
                 if (c > 0 && (best < 0 || bestC < SEA_LEVEL || c >= SEA_LEVEL && (owner[g] == p || owner[g] != best && area[p] >= area[best]))) { bestC = c; best = p; }
             }
@@ -919,10 +1028,10 @@ public final class Planet {
                 for (int i = 0; i < count; i++) { // convergent: the loser goes under
                     int p = present[i];
                     if (p == best) continue;
-                    int lx = wrapX(x + shift[p]);
-                    float c = plates[p].get(lx, row[p]);
+                    int lx = at[p] % w, ly = at[p] / w;
+                    float c = plates[p].get(lx, ly);
                     if (c == 0) continue;
-                    plates[p].set(lx, row[p], 0);
+                    plates[p].set(lx, ly, 0);
                     if (c >= SEA_LEVEL) { // only a continent can win against a continent
                         bestC += c * COLLISION_UPLIFT;
                         colliding = true;
@@ -943,7 +1052,8 @@ public final class Planet {
             gap[g] = spreads;
             if (bestC < SEA_LEVEL) bestC = Math.max(OCEAN, bestC - OCEAN_AGING);
             bestC = Math.min(bestC, 2 * MAX_CRUST); // format 112: diffuseRow spreads it inland before MAX_CRUST; past twice that it vanishes
-            plates[best].set(wrapX(x + shift[best]), row[best], bestC);
+            int lb = plates[best].ang == 0 ? wrapX(x + shift[best]) + row[best] * w : local(plates[best], x, y);
+            plates[best].set(lb % w, lb / w, bestC);
             owner[g] = best;
             height[g] = bestC;
         }
@@ -988,7 +1098,7 @@ public final class Planet {
             if (dist[g] < ARC_MIN || dist[g] > ARC_MAX || height[g] >= CONTINENT) continue;
             Plate p = plates[owner[g]];
             float peak = dist[g] > ARC_MIN && dist[g] < ARC_MAX ? 1 : 0.6f; // the arc's middle rows, so islands rise a few cells wide, not a one-cell thread
-            if (arcIslands != null) peak *= arcIslands[Math.floorMod(g % w - p.oxi, w) + Math.floorMod(g / w - p.oyi, h) * w]; // fixed to the plate, so an island keeps growing where it began
+            if (arcIslands != null) peak *= arcIslands[local(p, g % w, g / w)]; // fixed to the plate, so an island keeps growing where it began
             height[g] = Math.min(CONTINENT, height[g] + ARC_GROWTH * peak);
             setCrust(p, g % w, g / w, height[g]);
         }
@@ -1012,6 +1122,7 @@ public final class Planet {
             owner[g] = host;
         }
         d.clear();
+        d.ang = d.spin = d.tn = d.sn = 0; // format 116
         d.parent = -1;
         d.born = Integer.MIN_VALUE / 2; // the slot is no young strip any more
         for (Plate q : plates) if (q.parent == dead) q.parent = -1; // its strips go their own way
@@ -1059,9 +1170,14 @@ public final class Planet {
         d.oy = big.oy;
         d.oxi = big.oxi;
         d.oyi = big.oyi;
+        d.ang = big.ang; // format 116: the whole frame, turn and pivot too
+        d.tn = big.tn;
+        d.sn = big.sn;
+        d.px = big.px;
+        d.py = big.py;
         for (int g = 0; g < w * h; g++) {
             if (!strip[g] || owner[g] != torn) continue;
-            int lx = Math.floorMod(g % w - big.oxi, w), ly = Math.floorMod(g / w - big.oyi, h); // same frame offset, so same local cell in d
+            int l = local(big, g % w, g / w), lx = l % w, ly = l / w; // d has big's frame, so the same local cell
             d.set(lx, ly, big.get(lx, ly));
             big.set(lx, ly, 0);
             owner[g] = dead;
@@ -1069,12 +1185,16 @@ public final class Planet {
         if (rough != null) { // a ragged tear where it crosses continent, as format 102's rifts
             int split = dead, whole = torn;
             for (int g : raggedEdges(owner, k -> owner[k] == whole || owner[k] == split)) {
-                int lx = Math.floorMod(g % w - big.oxi, w), ly = Math.floorMod(g / w - big.oyi, h);
+                int l = local(big, g % w, g / w), lx = l % w, ly = l / w;
                 Plate to = owner[g] == split ? d : big, from = to == d ? big : d;
                 to.set(lx, ly, from.get(lx, ly));
                 from.set(lx, ly, 0);
             }
         }
+        Centroids after = centroids(); // format 116: the strip turns about its own middle as it rolls back (Japan's two halves swung opposite ways)
+        relay(dead, (int) after.x[dead], (int) Math.round(after.y[dead]));
+        relay(torn, (int) after.x[torn], (int) Math.round(after.y[torn]));
+        setSpin(d, after.area[dead]);
         double ux = sx / count - rx / rest, uy = sy / count - ry / rest, len = Math.max(1e-6, Math.hypot(ux, uy)); // from the rest toward the strip: toward the trench
         setVelocity(d, big.vx + ux / len * SPLIT_SPEED, big.vy + uy / len * SPLIT_SPEED);
         d.born = stepCount;
