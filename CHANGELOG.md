@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **Natural maar shapes**: explosion craters are drawn out and scalloped, as overlapping blasts leave them, with frayed
+  edges, instead of perfect circles (new worlds only).
 - **Taller ridge mountains**: where continents are still colliding, the range keeps rising while rivers cut it, and the
   thickened crust spreads a few cells inland, so young ranges stand 3-7.7 km high with snow and glaciers instead of
   wearing down to ~1.2 km hills; old ranges still wear down. Valley relief is capped so tall ranges read as massifs
