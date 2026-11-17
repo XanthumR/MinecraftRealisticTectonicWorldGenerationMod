@@ -141,6 +141,8 @@ public final class Terrain {
     static final float MAAR_LEVEL = 0.8f;   // of the radius: the most the land round a maar may rise over its lowest point; steeper sites get none
     static final float MAAR_RAGGED = 0.25f; // format 113: of the radius: how far the edge strays in and out round the crater (overlapping blasts)
     static final float MAAR_FRAY = 0.1f;    // format 113: of the radius: how far 16-block noise frays the crater's and the tuff ring's edges
+    static final float CRATER_RAGGED = 0.2f, CRATER_FRAY = 0.1f; // format 114: the same for a volcano's summit crater (not a caldera), of its radius
+    static final float RIM_CALM = 1.3f, RIM_FADE = 0.5f; // format 115: of a caldera's radius: valleys raise no ridges out to RIM_CALM, full relief RIM_FADE further
     static final int CHIMNEY_GRID = 8;      // format 90: real blocks between fairy chimney sites (each may hold one)
     static final float CHIMNEY_SHARE = 0.35f; // of the sites on a tuff slope that hold a chimney
     static final float CHIMNEY_SLOPE = 0.3f; // blocks per block the ground must fall at a site: chimneys stand on valley sides, not the plain
@@ -359,6 +361,8 @@ public final class Terrain {
     private final boolean hotCraters;     // magma patches round the crater, only a few vents on the flanks: format 87
     private final boolean maars;          // explosion craters with tuff rings and lakes round young volcanoes in wet country: format 88
     private final boolean raggedMaars;    // maars scalloped and drawn out, not round: format 113
+    private final boolean raggedCraters;  // summit craters scalloped and drawn out, not round: format 114
+    private final boolean calmRims;       // no valley ridges on caldera rims, which stood as thin walls: format 115
     private final boolean ignimbrites;    // tuff under the soil of supervolcanoes' ignimbrite plains (sim): format 89
     private final float[] tuff;           // format 89: 0..1 per cell, how much of it a supervolcano's ignimbrite covers
     private final boolean chimneys;       // fairy chimneys on the ignimbrite's slopes; ash and tuff ground gullied and screed like bare ground: format 90
@@ -536,6 +540,8 @@ public final class Terrain {
         hotCraters = data.format >= 87;
         maars = data.format >= 88;
         raggedMaars = data.format >= 113;
+        raggedCraters = data.format >= 114;
+        calmRims = data.format >= 115;
         ignimbrites = data.format >= 89;
         chimneys = data.format >= 90;
         travertines = data.format >= 91;
@@ -1701,9 +1707,34 @@ public final class Terrain {
      */
     private float maarReach(Maar m, double a) {
         if (!raggedMaars) return 1;
-        int key = (int) Math.floor(m.x) * 7919 + (int) Math.floor(m.z) * 104729;
-        return 1 + MAAR_RAGGED * (float) (0.5 * Math.sin(2 * a + 2 * Math.PI * hash01(key + 1)) + 0.3 * Math.sin(3 * a + 2 * Math.PI * hash01(key + 2))
+        return 1 + MAAR_RAGGED * lobes(m.x, m.z, a);
+    }
+
+    /** -1..1 round a pit's middle (cx, cz) on bearing a: an oval with scallops, the same for each place. */
+    private float lobes(double cx, double cz, double a) {
+        int key = (int) Math.floor(cx) * 7919 + (int) Math.floor(cz) * 104729;
+        return (float) (0.5 * Math.sin(2 * a + 2 * Math.PI * hash01(key + 1)) + 0.3 * Math.sin(3 * a + 2 * Math.PI * hash01(key + 2))
                 + 0.2 * Math.sin(5 * a + 2 * Math.PI * hash01(key + 3)));
+    }
+
+    /**
+     * From format 114: how far out a summit crater's edge lies on bearing a, in radii. Vents wander and the crater's
+     * walls slump in, so real summit craters are oval and notched (Etna's, Villarrica's), as maars are (format 113); 1
+     * before, and for calderas.
+     */
+    private float craterReach(Cone c, double a) {
+        return raggedCraters && !c.caldera ? 1 + CRATER_RAGGED * lobes(c.x, c.z, a) : 1;
+    }
+
+    /** Blocks from a cone's middle the crater reaches at most: its radius, and from format 114 its ragged edge's widest. */
+    private float craterOut(Cone c) {
+        return raggedCraters && !c.caldera ? (1 + CRATER_RAGGED + CRATER_FRAY) * c.craterRadius : c.craterRadius;
+    }
+
+    /** Distance from a cone's middle scaled so the crater's own edge lies at its craterRadius; d unchanged before format 114 and for calderas. */
+    private double craterDistance(Cone c, double x, double z, double d) {
+        if (!raggedCraters || c.caldera || c.craterRadius <= 0) return d;
+        return d / craterReach(c, Math.atan2(z - c.z, wrapBlocks(x - c.x))) + CRATER_FRAY * c.craterRadius * fine(x, z, 16, 141);
     }
 
     /** From format 88: a wet maar's lake level, a block under its rim, inside the crater; else none. */
@@ -1742,7 +1773,7 @@ public final class Terrain {
         // From format 97 none reaching into a volcano's crater: a neighbour's maar fell on a summit, its rim read on the land
         // without craters, and the crater's bowl then cut the ground out from under its lake (seed 777, x -9822 z 351).
         for (Cone o : naturalCones ? conesNear(m.x, m.z) : List.<Cone>of())
-            if (o.craterRadius > 0 && hyp(wrapBlocks(o.x - m.x), o.z - m.z) < o.craterRadius + (1 + MAAR_APRON) * m.r) rim = BREACHED;
+            if (o.craterRadius > 0 && hyp(wrapBlocks(o.x - m.x), o.z - m.z) < craterOut(o) + (1 + MAAR_APRON) * m.r) rim = BREACHED;
         return m.rim[0] = top - rim > MAAR_LEVEL * m.r ? BREACHED : rim;
     }
 
@@ -2167,7 +2198,8 @@ public final class Terrain {
         for (Cone c : conesNear(x, z)) {
             double d = hyp(wrapBlocks(x - c.x), z - c.z);
             if (d >= (landforms ? c.radius + SPRING_MARGIN : c.reach())) continue;
-            float rim = d < c.craterRadius ? craterRim(c) : 0, pool = rim - c.craterDepth * (c.caldera ? CALDERA_LAKE : 0.6f), wobble = rough * (1 + 0.02f * c.height);
+            double dc = craterDistance(c, x, z, d); // from format 114 the crater's ragged edge
+            float rim = dc < c.craterRadius ? craterRim(c) : 0, pool = rim - c.craterDepth * (c.caldera ? CALDERA_LAKE : 0.6f), wobble = rough * (1 + 0.02f * c.height);
             if (d < c.craterRadius && c.caldera) {
                 // A flat floor under walls that steepen up to the rim; maybe a young cone rising from the lake as an island.
                 float wall = smoothstep((float) (d / c.craterRadius - 0.7f) / 0.3f), floor = rim - c.craterDepth;
@@ -2177,8 +2209,8 @@ public final class Terrain {
                     double e = hyp(wrapBlocks(x - ix), z - iz), ir = 0.3 * c.craterRadius;
                     if (e < ir) ground = Math.max(ground, Math.round(floor + c.craterDepth * 0.8f * (float) (1 - e / ir)));
                 }
-            } else if (d < c.craterRadius && (realCraters || !(ownCraters && ground > coneY(c, x, z) + CRATER_OWN + (rampShores ? c.craterDepth : 0))) && !drowned(c)) {
-                ground = pit(c, x, z, d, ground, rim, wobble);
+            } else if (dc < c.craterRadius && (realCraters || !(ownCraters && ground > coneY(c, x, z) + CRATER_OWN + (rampShores ? c.craterDepth : 0))) && !drowned(c)) {
+                ground = pit(c, x, z, dc, ground, rim, wobble);
             } else if (d < c.reach() && !simCalderas) { // from format 22 the summit is sharpened in surface(), before the rivers
                 float s = coneY(c, d) + wobble, fade = c.legacy ? 1 : smoothstep((float) ((c.reach() - d) / (0.1 * c.radius)));
                 if (s > ground) ground = Math.round(ground + fade * (s - ground));
@@ -2231,7 +2263,7 @@ public final class Terrain {
                         }
                     }
             }
-            if (d < c.craterRadius && ground < pool && !drowned(c) && !(c.dome > 0 && c.v.active())) { // a dome plugs its vent: no lava lake
+            if (dc < c.craterRadius && ground < pool && !drowned(c) && !(c.dome > 0 && c.v.active())) { // a dome plugs its vent: no lava lake
                 crater = true;
                 if (c.v.active() && pool > SEA_Y) lava = (int) pool;
                 else water = Math.max(water, (int) pool);
@@ -2776,15 +2808,15 @@ public final class Terrain {
         rim = Float.MAX_VALUE;
         // Craters reaching into each other: each one's pool hung over the pit the other cut (seed 777, x -6688 z 3904).
         for (Cone o : conesNear(c.x, c.z))
-            if (o != c && o.craterRadius > 0 && !o.collapsed && hyp(wrapBlocks(o.x - c.x), o.z - c.z) < c.craterRadius + o.craterRadius) rim = BREACHED;
+            if (o != c && o.craterRadius > 0 && !o.collapsed && hyp(wrapBlocks(o.x - c.x), o.z - c.z) < craterOut(c) + craterOut(o)) rim = BREACHED;
         // The rim: the finished ground just outside the crater. The surface alone missed the summit's creeks, whose banks
         // stand 20-30 blocks over its massif valleys. Water or lava there or half-way in (a lake's shore, a creek crossing
         // the summit) breaches it: a pit cut beside them left dry ground under their surface (seed 777, x 9077 z 9491).
-        double r = c.craterRadius + 1;
+        double r = c.craterRadius + 1, out = raggedCraters ? (1 + CRATER_RAGGED + CRATER_FRAY) * c.craterRadius + 1 : r; // out: the farthest the ragged edge reaches
         busy[0] = true;
         try {
             for (int i = 0; i < 32; i++) {
-                double a = i * Math.PI / 16, ca = Math.cos(a), sa = Math.sin(a);
+                double a = i * Math.PI / 16, ca = Math.cos(a) * craterReach(c, a), sa = Math.sin(a) * craterReach(c, a); // from format 114 round its own edge
                 Column at = column(c.x + r * ca, c.z + r * sa, false), in = i % 2 == 0 ? column(c.x + r * ca / 2, c.z + r * sa / 2, false) : at;
                 if (wet(at) || wet(in)) rim = BREACHED;
                 rim = Math.min(rim, at.ground());
@@ -2795,7 +2827,7 @@ public final class Terrain {
         // From format 97 a creek anywhere across the crater breaches it too: the samples half-way in lie 13 blocks apart,
         // and a creek slipping between them had its banks cut away by the bowl, its water left over dry ground (seed 777,
         // x -9822 z 351: lobed summits gather more creeks).
-        if (naturalCones && riverAt(c.x, c.z, warpU(c.x, c.z), warpV(c.x, c.z)).edge < c.craterRadius + 2) rim = BREACHED;
+        if (naturalCones && riverAt(c.x, c.z, warpU(c.x, c.z), warpV(c.x, c.z)).edge < out + 1) rim = BREACHED;
         return c.edge[0] = rim;
     }
 
@@ -2835,6 +2867,22 @@ public final class Terrain {
 
     /** Within a collapsed volcano's caldera (and a little beyond its rim), in unzoomed blocks. */
     /** 1 deeper than wall blocks inside a collapsed caldera's edge, easing to 0 at it; with wall 0, above 0 anywhere inside. */
+    /**
+     * From format 115: 0 over a collapsed volcano's caldera and its rim, out to RIM_CALM radii, rising to 1 over RIM_FADE
+     * more. The rim is a divide, water running in to the lake and out down the flanks, and Valleys stood its ridges up
+     * there by their full relief: a free-standing blade of spires round the hole (a player, 3650 -5330). A real rim is
+     * a crest over the caldera's cliff with the volcano's flank falling away outside (Crater Lake), as the cells have it.
+     */
+    private float rimCalm(double x, double z) {
+        float calm = 1;
+        for (Cone c : conesNear(x, z)) {
+            if (!c.collapsed) continue;
+            double r = volcanoKinds && c.v.supervolcano() ? c.v.superBlocks() : Volcano.CALDERA_SHARE * c.radius;
+            calm = Math.min(calm, smoothstep((float) ((hyp(wrapBlocks(x - c.x), z - c.z) / r - RIM_CALM) / RIM_FADE)));
+        }
+        return calm;
+    }
+
     private float insideCaldera(double x, double z, double wall) {
         float in = 0;
         for (Cone c : conesNear(x, z)) {
@@ -2854,6 +2902,7 @@ public final class Terrain {
         out[0] = natural;
         if (high <= VALLEY_HIGH) { out[1] = out[3] = 0; out[2] = 2; return; }
         float relief = Math.min(talus ? TALUS_MASSIF_RELIEF : MASSIF_RELIEF, MASSIF_SHARE * high) * smoothstep((high - 20) / 60);
+        if (calmRims) relief *= rimCalm(x, z);
         out[1] = Math.min(valleyCap, relief * valleyDepth); // both the ridges' slope over their valleys and how far either may stand off the cell's mean
         boolean wet = !Float.isNaN(lakeY[cell((int) Math.round(u), (int) Math.round(v))]); // lakes hold their water's level; rivers are cut later, along the valleys
         out[2] = wet ? 1 : 0;
@@ -2956,7 +3005,7 @@ public final class Terrain {
      * building, not a peak the cirques carved; laid over the crater, a horn stood 40 blocks up out of its floor.
      */
     private boolean hornOnCrater(Horn horn) {
-        for (Cone c : conesNear(horn.x, horn.z)) if (c.craterRadius > 0 && hyp(wrapBlocks(horn.x - c.x), horn.z - c.z) < c.craterRadius + HORN_RADIUS) return true;
+        for (Cone c : conesNear(horn.x, horn.z)) if (c.craterRadius > 0 && hyp(wrapBlocks(horn.x - c.x), horn.z - c.z) < craterOut(c) + HORN_RADIUS) return true;
         return false;
     }
 
