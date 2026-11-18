@@ -10,7 +10,9 @@ import com.realtectonics.sim.Terrain;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.gui.components.AbstractSliderButton;
 import net.minecraft.client.gui.components.Button;
+import net.minecraft.client.gui.components.AbstractWidget;
 import net.minecraft.client.gui.components.CycleButton;
+import net.minecraft.client.gui.components.Tooltip;
 import net.minecraft.client.input.MouseButtonEvent;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.gui.screens.worldselection.CreateWorldScreen;
@@ -84,25 +86,25 @@ public final class PlanetScreen extends Screen {
             simulate();
         }
         int cx = width / 2, y = 24 + mapWidth() / 2 + 8;
-        addRenderableWidget(new Slider(cx - 155, y, "Plates", 6, 60, settings.plates(), false, true, v -> settings = settings.withPlates((int) v)));
-        addRenderableWidget(new Slider(cx + 5, y, "Ocean", 0.5, 0.85, settings.oceanFraction(), true, true, v -> settings = settings.withOceanFraction((float) v)));
+        addRenderableWidget(tip(new Slider(cx - 155, y, "Plates", 6, 60, settings.plates(), false, true, v -> settings = settings.withPlates((int) v)), "How many tectonic plates. More plates: more, smaller continents, and more mountain ranges where they push together."));
+        addRenderableWidget(tip(new Slider(cx + 5, y, "Ocean", 0.5, 0.85, settings.oceanFraction(), true, true, v -> settings = settings.withOceanFraction((float) v)), "How much of the planet is sea."));
         y += 24;
-        addRenderableWidget(CycleButton.<Integer>builder(w -> Component.literal(w < 1024 ? "Small" : w == 1024 ? "Medium" : w == 2048 ? "Large (slow)" : "Huge (2-3 min)"), settings.width())
+        addRenderableWidget(tip(CycleButton.<Integer>builder(w -> Component.literal(w < 1024 ? "Small" : w == 1024 ? "Medium" : w == 2048 ? "Large (slow)" : "Huge (2-3 min)"), settings.width())
                 .withValues(Arrays.stream(PlanetSettings.WIDTHS).boxed().toList())
                 .create(cx - 155, y, 150, 20, Component.literal("Size"), (button, w) -> {
                     settings = settings.withWidth(w);
                     restartIn = RESTART_DELAY;
-                }));
-        addRenderableWidget(new Slider(cx + 5, y, "Mountains", 0.5, 2, settings.mountainScale(), true, false, v -> settings = settings.withMountainScale((float) v)));
+                }), "How big the planet is. The world wraps round east-west and ends at the poles: about 16,000 blocks round on Small, 33,000 on Medium, 65,000 on Large and 131,000 on Huge (times World scale). Large takes ~1 min to make and needs about 6 GB of RAM given to the game, Huge 4-8 min and 8 GB or more (the launcher gives 2 GB by default)."));
+        addRenderableWidget(tip(new Slider(cx + 5, y, "Mountains", 0.5, 2, settings.mountainScale(), true, false, v -> settings = settings.withMountainScale((float) v)), "How tall the land is: at 1.0 a block is 15 m high. Higher makes taller, steeper mountains and deeper valleys."));
         y += 24;
-        addRenderableWidget(CycleButton.<Integer>builder(z -> Component.literal("x" + z + (z == 1 ? " (compact)" : "")), settings.zoom())
+        addRenderableWidget(tip(CycleButton.<Integer>builder(z -> Component.literal("x" + z + (z == 1 ? " (compact)" : "")), settings.zoom())
                 .withValues(Arrays.stream(PlanetSettings.ZOOMS).boxed().toList())
-                .create(cx - 155, y, 150, 20, Component.literal("World scale"), (button, z) -> settings = settings.withZoom(z)));
-        addRenderableWidget(new Slider(cx + 5, y, "Volcanoes", 0, 2, settings.volcanoes(), true, true, v -> settings = settings.withVolcanoes((float) v)));
+                .create(cx - 155, y, 150, 20, Component.literal("World scale"), (button, z) -> settings = settings.withZoom(z)), "Zooms the same planet in: at x2 or x4 everything is 2 or 4 times as wide in blocks, so continents are bigger and slopes gentler."));
+        addRenderableWidget(tip(new Slider(cx + 5, y, "Volcanoes", 0, 2, settings.volcanoes(), true, true, v -> settings = settings.withVolcanoes((float) v)), "How many volcanoes: 0 none, 1 about as many as Earth, 2 twice as many."));
         y += 24;
-        addRenderableWidget(new Slider(cx - 155, y, "Steps", 100, 1200, settings.steps(), false, true, v -> settings = settings.withSteps((int) v)));
+        addRenderableWidget(tip(new Slider(cx - 155, y, "Steps", 100, 1200, settings.steps(), false, true, v -> settings = settings.withSteps((int) v)), "How long the plates drift before the world is made. Few steps: a young planet with many small continents. Many: an old one with fewer, bigger continents and more worn mountains. More steps take longer to make."));
 
-        addRenderableWidget(new Slider(cx + 5, y, "Rivers", 0.5, 4, settings.riverWidth(), true, false, v -> settings = settings.withRiverWidth((float) v)));
+        addRenderableWidget(tip(new Slider(cx + 5, y, "Rivers", 0.5, 4, settings.riverWidth(), true, false, v -> settings = settings.withRiverWidth((float) v)), "How wide rivers are."));
         y += 24;
         // On Earth, the region spawn lies in; a new run moves the map's spawn marker there
         CycleButton<Integer> start = CycleButton.<Integer>builder(k -> Component.literal(PlanetSettings.START_NAMES[k]), settings.start())
@@ -112,23 +114,24 @@ public final class PlanetScreen extends Screen {
                     restartIn = RESTART_DELAY;
                 });
         start.active = settings.earth();
+        tip(start, "On the Earth planet: the region you spawn in.");
         addRenderableWidget(start);
-        addRenderableWidget(CycleButton.onOffBuilder(settings.earth()) // Earth: real continents and plates; plates, ocean, volcanoes and steps then do nothing
+        addRenderableWidget(tip(CycleButton.onOffBuilder(settings.earth()) // Earth: real continents and plates; plates, ocean, volcanoes and steps then do nothing
                 .create(cx - 155, y, 150, 20, Component.literal("Earth"), (button, on) -> {
                     settings = settings.withEarth(on);
                     start.active = on;
                     restartIn = RESTART_DELAY;
-                }));
+                }), "Real Earth: its continents, mountains, lakes and plates instead of a made-up planet. Plates, Ocean, Volcanoes and Steps then do nothing."));
         y += 24;
         // Tablelands (uplifted flat-lying sedimentary rock) step down in cliffs this many blocks tall, benches between them
-        addRenderableWidget(new Slider(cx - 155, y, "Cliff height", 8, 48, settings.cliffHeight(), false, false, v -> settings = settings.withCliffHeight((int) v)));
+        addRenderableWidget(tip(new Slider(cx - 155, y, "Cliff height", 8, 48, settings.cliffHeight(), false, false, v -> settings = settings.withCliffHeight((int) v)), "Blocks between the steps of tablelands and mesas: the layered rock of high, dry plateaus steps down in cliffs this tall."));
         // On Large and Huge: continents, plates and climate belts sized as on Medium, more of them; Plates then counts per Medium's worth
-        addRenderableWidget(CycleButton.<Boolean>builder(on -> Component.literal(on ? "Medium-sized" : "Grow with size"), settings.mediumContinents())
+        addRenderableWidget(tip(CycleButton.<Boolean>builder(on -> Component.literal(on ? "Medium-sized" : "Grow with size"), settings.mediumContinents())
                 .withValues(false, true)
                 .create(cx + 5, y, 150, 20, Component.literal("Continents"), (button, on) -> {
                     settings = settings.withMediumContinents(on);
                     restartIn = RESTART_DELAY;
-                }));
+                }), "On Large and Huge. Medium-sized: continents, plates and climate belts stay the size they are on Medium, and there are more of them. Grow with size: the same few continents, grown bigger."));
         y += 24;
         addRenderableWidget(Button.builder(Component.literal("New planet"), b -> {
             seed = WorldOptions.randomSeed();
@@ -139,6 +142,12 @@ public final class PlanetScreen extends Screen {
                 .create(cx - 77, y, 75, 20, Component.literal("Map"), (button, on) -> { three = on; redraw = true; }));
         addRenderableWidget(Button.builder(Component.literal("Done"), b -> apply()).bounds(cx + 1, y, 75, 20).build());
         addRenderableWidget(Button.builder(Component.literal("Cancel"), b -> onClose()).bounds(cx + 79, y, 75, 20).build());
+    }
+
+    /** A widget with a line of help shown while the mouse is over it. */
+    private static <T extends AbstractWidget> T tip(T widget, String text) {
+        widget.setTooltip(Tooltip.create(Component.literal(text)));
+        return widget;
     }
 
     private int mapWidth() {
