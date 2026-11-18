@@ -103,6 +103,9 @@ come from `markLakes`.
   relief within 10 km ~150 m vs 700-1500 m, spectral slope 3.6-4.4 vs 2.4-3.1 (too little 1-10 km valley relief; format 100's valleys: 2,500 m belts' 10 km relief 74-121 -> 87-207 m; format 111's 1.5x depth: 117-196 -> 147-264 m, slope 0.6-1.0 -> 0.8-1.3°); the
   highest game plateaus sit at ~7 km median vs Tibet's ~5 km.
 - Temperature falls about 0.1 °C per block at Mountains 1.0.
+- Memory (seed 777, planet + Terrain, 2026-11-18): Medium peaks ~0.5 GB of heap; Large runs in a 1.5 GB cap (0.7 GB live, 52-71 s);
+  Huge in a 4 GB cap (2.3-2.9 GB live, 211 s, 449 s with Medium-sized continents), ~2 GB kept. With the game itself the Size tooltip
+  says ~6 GB for Large, 8+ for Huge; the launcher's default 2 GB crashes them (a player's report).
 
 ## Workflow and tools (scripts in `tools/`, renders in `out/`; `build/` is Gradle's and may be wiped)
 - Speed: `tools/genab.sh` (whole pipeline on the dev server, its three areas 49/86/91 chunks/s; Distant Horizons takes about half the CPU

@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- **Tooltips** on every world-creation option: hover over a slider or button to see what it does.
 - **Mesas and plateaus by differential erosion**: a few broad plateaus of layered rock rise ~2-3 km, hard beds over soft
   shale. Rivers cut through and the shale wears back fast, so they stand as stepped mesas ~100 blocks over the plain with
   flat tops, forest on wet ones and juniper woodland (wooded badlands) on dry ones (new worlds only).
